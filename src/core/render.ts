@@ -4,8 +4,10 @@ import type { Report, Section } from "./types";
 
 export type Theme = "dark" | "light";
 
-const SANS = "-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Helvetica, Arial, sans-serif";
-const MONO = "ui-monospace, &#39;SF Mono&#39;, Menlo, Consolas, monospace";
+// Unquoted multi-word names are valid CSS and are understood by resvg, which renders the OG images with the
+// bundled Fira Sans and IBM Plex Mono (it ignores quoted names after a missing one).
+const SANS = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, Fira Sans, sans-serif";
+const MONO = "ui-monospace, SF Mono, Menlo, Consolas, IBM Plex Mono, monospace";
 
 const PALETTE = {
   dark: { bg: "#101B2C", border: "#35465E", text: "#F2F5FA", muted: "#A8B7CC", accent: "#A4B5FF", none: "#66768B" },
@@ -128,7 +130,7 @@ export function renderOg(r: Report): string {
   parts.push(`<text x="132" y="96" fill="${p.text}" font-family="${SANS}" font-size="40" font-weight="700" letter-spacing="-1">howmuch<tspan fill="${p.accent}">ai</tspan></text>`);
   parts.push(text(1140, 92, p.muted, SANS, 24, "How much of this repo was built with AI?", `text-anchor="end"`));
   parts.push(text(60, 200, p.text, MONO, name.length > 28 ? 40 : 52, name, `font-weight="700"`));
-  parts.push(text(56, 400, p.text, MONO, share.length > 4 ? 150 : 180, share, `font-weight="700" letter-spacing="-6"`));
+  parts.push(text(56, 400, p.text, MONO, share.length > 4 ? 150 : 180, share, `font-weight="700" letter-spacing="-3"`));
   parts.push(text(62, 452, p.muted, SANS, 30, "of recent commits are AI-signed"));
   agents.forEach(([id, n], i) => {
     const y = 300 + i * 46;
