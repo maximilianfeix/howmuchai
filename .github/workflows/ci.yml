@@ -22,6 +22,12 @@ jobs:
         run: git diff --exit-code -- dist/cli.mjs action/index.mjs
       - name: CLI runs
         run: node dist/cli.mjs --help
+      - name: OG images for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: og-images
+          path: test-results/og/
   e2e:
     runs-on: ubuntu-latest
     steps:

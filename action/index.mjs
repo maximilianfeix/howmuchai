@@ -937,8 +937,8 @@ function escapeXml(s) {
 }
 
 // src/core/render.ts
-var SANS = "-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Helvetica, Arial, sans-serif";
-var MONO = "ui-monospace, &#39;SF Mono&#39;, Menlo, Consolas, monospace";
+var SANS = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, Fira Sans, sans-serif";
+var MONO = "ui-monospace, SF Mono, Menlo, Consolas, IBM Plex Mono, monospace";
 var PALETTE = {
   dark: { bg: "#101B2C", border: "#35465E", text: "#F2F5FA", muted: "#A8B7CC", accent: "#A4B5FF", none: "#66768B" },
   light: { bg: "#FFFFFF", border: "#C7D1DF", text: "#18263A", muted: "#52627A", accent: "#4056BC", none: "#66768B" }

@@ -5,13 +5,13 @@
  *
  *   tsx scripts/assemble.ts --site dist/site --data .data [--no-og]
  */
-import { Resvg } from "@resvg/resvg-js";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ogPath, pagePath } from "../src/core/dataset";
 import { escapeXml, formatShare } from "../src/core/format";
 import { agentName } from "../src/core/registry";
-import { periodLabel, renderOg } from "../src/core/render";
+import { periodLabel } from "../src/core/render";
+import { renderOgPng } from "./lib/og";
 import { validateBoard, validateReport } from "../src/core/validate";
 import type { Report } from "../src/core/types";
 
@@ -125,13 +125,7 @@ for (const f of reports) {
   );
   urls.push(url);
   if (OG) {
-    const png = new Resvg(renderOg(r), {
-      fitTo: { mode: "width", value: 1200 },
-      font: { loadSystemFonts: true, defaultFontFamily: "DejaVu Sans" },
-    })
-      .render()
-      .asPng();
-    write(ogPath(r.repo.fullName), png);
+    write(ogPath(r.repo.fullName), renderOgPng(r));
     ogCount++;
   }
 }
