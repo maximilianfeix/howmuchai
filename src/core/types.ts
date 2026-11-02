@@ -16,6 +16,8 @@ export interface Signal {
   /** JavaScript regular expression source, matched case-insensitively. */
   pattern: string;
   confidence: Confidence;
+  /** Lower-case text a line must contain before the pattern is tried (line-based kinds only). */
+  contains?: string;
   note?: string;
 }
 
@@ -63,6 +65,8 @@ export interface PullInput {
 
 export interface Match {
   agentId: string;
+  /** Id of the signal that matched. */
+  signalId: string;
   kind: SignalKind;
   /** The text that matched, trimmed, for the evidence list. */
   matched: string;
@@ -80,6 +84,7 @@ export interface Evidence {
   matched: string;
   /** Missing in reports made before registry v2. */
   confidence?: Confidence;
+  signalId?: string;
 }
 
 export interface MonthBucket {

@@ -89,7 +89,7 @@ howmuchai does not guess and does not run an AI detector. It counts what is **di
 | Commit trailers | `Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>`, `Co-authored-by: Copilot <…copilot@users.noreply.github.com>`, `Co-authored-by: gpt-6-astra (Codex) <…>`, `Co-authored-by: Cursor Agent <cursoragent@cursor.com>` |
 | Commit and PR authors | `copilot-swe-agent[bot]`, `devin-ai-integration[bot]`, `google-labs-jules[bot]`, `claude[bot]`, `cursor[bot]`, `opencode-agent[bot]`, author names ending in `(aider)` |
 | Footers | `🤖 Generated with [Claude Code](https://claude.com/claude-code)` |
-| Hints, shown but not counted | PR branches `codex/`, `cursor/`, `claude/`, `copilot/`, `capy/`; the bare name `Junie` |
+| Hints, shown but not counted | PR branches `codex/`, `cursor/`, `claude/`, `copilot/`, `capy/`; the name `Junie` with a non-JetBrains address |
 
 The full list with regular expressions lives in [`signatures/agents.json`](signatures/agents.json), built from what really shows up in the top 1,000 repos.
 

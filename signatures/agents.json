@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "ignoredAuthors": [
     "dependabot[bot]",
     "dependabot-preview[bot]",
@@ -31,9 +31,10 @@
         {
           "id": "claude-code/footer",
           "kind": "commit-message",
-          "pattern": "^[^\\S\\n]*(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?claude code\\]?(?:\\(https?://[^)\\s]+\\))?[^\\S\\n]*\\.?[^\\S\\n]*$",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?claude code\\]?(?:\\(<?https?://[^)\\s>]+>?\\))?[_*]{0,2}[^\\S\\n]*\\.?[^\\S\\n]*$",
           "confidence": "high",
-          "note": "Default footer \"🤖 Generated with [Claude Code](…)\" on a line of its own"
+          "note": "Default footer \"🤖 Generated with [Claude Code](…)\" on a line of its own",
+          "contains": "generated"
         },
         {
           "id": "claude-code/author",
@@ -51,8 +52,9 @@
         {
           "id": "claude-code/pr-footer",
           "kind": "pr-body",
-          "pattern": "^[^\\S\\n]*(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?claude code\\]?(?:\\(https?://[^)\\s]+\\))?[^\\S\\n]*\\.?[^\\S\\n]*$",
-          "confidence": "high"
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?claude code\\]?(?:\\(<?https?://[^)\\s>]+>?\\))?[_*]{0,2}[^\\S\\n]*\\.?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "generated"
         },
         {
           "id": "claude-code/pr-branch",
@@ -60,6 +62,44 @@
           "pattern": "^claude/[^\\s]+$",
           "confidence": "medium",
           "note": "Default branch prefix of Claude Code on the web and the Claude GitHub app"
+        },
+        {
+          "id": "claude-code/session",
+          "kind": "commit-message",
+          "pattern": "https://claude\\.ai/code/session_[A-Za-z0-9]{8,}",
+          "confidence": "high",
+          "contains": "claude.ai/code/session_",
+          "note": "Session link added by Claude Code on the web (also as a Claude-Session: trailer)"
+        },
+        {
+          "id": "claude-code/pr-session",
+          "kind": "pr-body",
+          "pattern": "https://claude\\.ai/code/session_[A-Za-z0-9]{8,}",
+          "confidence": "high",
+          "contains": "claude.ai/code/session_"
+        },
+        {
+          "id": "claude-code/assisted-by",
+          "kind": "commit-trailer",
+          "pattern": "^assisted-by:[ \\t]*claude\\b[^\\n]{0,80}$",
+          "confidence": "high",
+          "note": "Assisted-by trailer naming Claude (Linux kernel / LLVM convention)"
+        },
+        {
+          "id": "claude-code/pr-trailer",
+          "kind": "pr-body",
+          "pattern": "^co-authored-by:[ \\t]*claude\\b[^<\\n]*<noreply@anthropic\\.com>",
+          "confidence": "high",
+          "contains": "noreply@anthropic.com",
+          "note": "Claude Code trailer pasted into the PR description"
+        },
+        {
+          "id": "claude-code/pr-assisted-by",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*claude\\b[^\\n]{0,80}$",
+          "confidence": "high",
+          "contains": "assisted-by",
+          "note": "Assisted-by line in the pull request description"
         }
       ]
     },
@@ -94,6 +134,34 @@
           "pattern": "^copilot/[^\\s]+$",
           "confidence": "medium",
           "note": "Default branch prefix of the Copilot coding agent"
+        },
+        {
+          "id": "copilot/session",
+          "kind": "commit-trailer",
+          "pattern": "^copilot-session:[ \\t]*[0-9a-f]{8}-[0-9a-f-]{8,}$",
+          "confidence": "high",
+          "note": "Session trailer added by GitHub Copilot CLI"
+        },
+        {
+          "id": "copilot/pr-suffix",
+          "kind": "pr-body",
+          "pattern": "<!--[ \\t]*START COPILOT CODING AGENT SUFFIX[ \\t]*-->",
+          "confidence": "high",
+          "contains": "copilot coding agent suffix",
+          "note": "Marker the Copilot coding agent adds to its pull requests"
+        },
+        {
+          "id": "copilot/assisted-by",
+          "kind": "commit-trailer",
+          "pattern": "^assisted-by:[ \\t]*(?:github[ \\t]+)?copilot\\b[^\\n]{0,80}$",
+          "confidence": "high"
+        },
+        {
+          "id": "copilot/pr-assisted-by",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*(?:github[ \\t]+)?copilot\\b[^\\n]{0,80}$",
+          "confidence": "high",
+          "contains": "assisted-by"
         }
       ]
     },
@@ -127,6 +195,19 @@
           "pattern": "^codex/[^\\s]+$",
           "confidence": "medium",
           "note": "Default branch prefix of Codex cloud tasks"
+        },
+        {
+          "id": "codex/assisted-by",
+          "kind": "commit-trailer",
+          "pattern": "^assisted-by:[ \\t]*(?:openai[ \\t]+)?codex\\b[^\\n]{0,80}$",
+          "confidence": "high"
+        },
+        {
+          "id": "codex/pr-assisted-by",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*(?:openai[ \\t]+)?codex\\b[^\\n]{0,80}$",
+          "confidence": "high",
+          "contains": "assisted-by"
         }
       ]
     },
@@ -160,6 +241,35 @@
           "pattern": "^cursor/[^\\s]+$",
           "confidence": "medium",
           "note": "Default branch prefix of Cursor background agents"
+        },
+        {
+          "id": "cursor/pr-footer",
+          "kind": "pr-body",
+          "pattern": "https://cursor\\.com/agents/[A-Za-z0-9-]+\\?[^\\s\\\"]*cursor_ref=pr_footer",
+          "confidence": "high",
+          "contains": "cursor_ref=pr_footer",
+          "note": "\"Open in Cursor\" footer of Cursor agent pull requests"
+        },
+        {
+          "id": "cursor/assisted-by",
+          "kind": "commit-trailer",
+          "pattern": "^assisted-by:[ \\t]*cursor\\b[^\\n]{0,80}$",
+          "confidence": "high"
+        },
+        {
+          "id": "cursor/pr-marker",
+          "kind": "pr-body",
+          "pattern": "<!--[ \\t]*CURSOR_AGENT_PR_BODY_BEGIN[ \\t]*-->",
+          "confidence": "high",
+          "contains": "cursor_agent_pr_body_begin",
+          "note": "Marker Cursor agents put around the pull request description"
+        },
+        {
+          "id": "cursor/pr-assisted-by",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*cursor\\b[^\\n]{0,80}$",
+          "confidence": "high",
+          "contains": "assisted-by"
         }
       ]
     },
@@ -179,6 +289,27 @@
           "kind": "pr-author",
           "pattern": "^devin-ai-integration(?:\\[bot\\])?$",
           "confidence": "high"
+        },
+        {
+          "id": "devin/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:\\d+\\+)?devin-ai-integration\\[bot\\]@users\\.noreply\\.github\\.com>",
+          "confidence": "high",
+          "note": "\"Co-Authored-By: Devin AI <…devin-ai-integration[bot]…>\""
+        },
+        {
+          "id": "devin/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}generated (?:with|by) \\[devin\\]\\(https://devin\\.ai[^)\\s]*\\)",
+          "confidence": "high",
+          "contains": "devin.ai"
+        },
+        {
+          "id": "devin/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}generated (?:with|by) \\[devin\\]\\(https://devin\\.ai[^)\\s]*\\)",
+          "confidence": "high",
+          "contains": "devin.ai"
         }
       ]
     },
@@ -288,6 +419,14 @@
           "kind": "pr-branch",
           "pattern": "^capy/[^\\s]+$",
           "confidence": "medium"
+        },
+        {
+          "id": "capy/pr-thread",
+          "kind": "pr-body",
+          "pattern": "https://capy\\.ai/thread/[A-Za-z0-9_]{8,}",
+          "confidence": "high",
+          "contains": "capy.ai/thread/",
+          "note": "Thread link in Capy pull requests"
         }
       ]
     },
@@ -325,9 +464,16 @@
         {
           "id": "junie/trailer",
           "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*junie\\b[^<\\n]*<[^>\\n]*@jetbrains\\.com>",
+          "confidence": "high",
+          "note": "JetBrains Junie, \"Co-authored-by: Junie <junie@jetbrains.com>\""
+        },
+        {
+          "id": "junie/trailer-name",
+          "kind": "commit-trailer",
           "pattern": "^co-authored-by:[ \\t]*junie\\b[^<\\n]*<[^>\\n]+>",
           "confidence": "medium",
-          "note": "JetBrains Junie"
+          "note": "Junie with another address"
         }
       ]
     }
