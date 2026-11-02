@@ -5,7 +5,7 @@ import { escapeXml as esc, formatShare } from "../../src/core/format";
 import { GitHubClient, GitHubError } from "../../src/core/github";
 import { agentColor, agentName, registry } from "../../src/core/registry";
 import { periodLabel, renderCard } from "../../src/core/render";
-import type { Report, Section } from "../../src/core/types";
+import { REPORT_SCHEMA, type Report, type Section } from "../../src/core/types";
 
 const BASE = import.meta.env.BASE_URL; // "/howmuchai/" or "/"
 const SITE = __SITE__; // absolute site URL without trailing slash
@@ -70,7 +70,12 @@ function legendHtml(sec: Section, unit: string): string {
     ([id, n]) => `<li><span class="sw" style="background:${agentColor(id)}"></span>${esc(agentName(id))} <span class="n">${n} · ${formatShare(n, sec.total)}</span></li>`,
   );
   items.push(`<li><span class="sw" style="background:var(--none)"></span>No signature found <span class="n">${sec.total - sec.ai} · ${formatShare(sec.total - sec.ai, sec.total)}</span></li>`);
-  return `<ul class="legend" aria-label="${esc(unit)} by agent">${items.join("")}</ul>`;
+  const hints = sec.hints
+    ? `<p class="muted" style="font-size:14px;margin:4px 0 0">Plus ${sec.hints} with only a hint (${sortedAgents(sec.hintsByAgent)
+        .map(([id, n]) => `${esc(agentName(id))} ${n}`)
+        .join(", ")}), for example a default agent branch name. Hints are listed in the evidence but not counted.</p>`
+    : "";
+  return `<ul class="legend" aria-label="${esc(unit)} by agent">${items.join("")}</ul>${hints}`;
 }
 
 // ---------- data ----------
@@ -87,7 +92,9 @@ async function loadStored(fullName: string): Promise<Report | null> {
   try {
     const r = await fetch(url(reportPath(fullName)));
     if (!r.ok) return null;
-    return (await r.json()) as Report;
+    const rep = (await r.json()) as Report;
+    // Older reports counted hints as signatures; measure those live instead.
+    return rep.schema === REPORT_SCHEMA ? rep : null;
   } catch {
     return null;
   }
@@ -484,7 +491,7 @@ function renderMethod() {
       <li>Most agents can be told not to add their signature, and many people turn it off.</li>
       <li>Squash merges can drop trailers, and code pasted from a chat window leaves no mark.</li>
       <li>A signature says an agent was involved, not how many lines it wrote. A one-line fix and a full rewrite count the same.</li>
-      <li>Some signals are only hints (marked "medium"), for example default branch names like <code>codex/</code>, which a person can also choose.</li>
+      <li>Some signals are only hints (marked "medium"), for example default branch names like <code>codex/</code>, which a person can also choose. Hints are shown in the evidence list but never counted in the numbers.</li>
     </ul>
     <p>So: a high number means a lot of disclosed AI involvement. A low number does not mean little AI use. "No signature found" never means human-only.</p>
     <h2>Signatures</h2>

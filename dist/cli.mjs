@@ -574,7 +574,7 @@ function parseRepo(input) {
   return `${m[1]}/${m[2]}`;
 }
 function emptySection() {
-  return { total: 0, ai: 0, byAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
+  return { total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
 }
 function bucket(months, date) {
   const month = date.slice(0, 7);
@@ -588,6 +588,20 @@ function bucket(months, date) {
 function firstLine(s) {
   return (s.split("\n")[0] ?? "").trim().slice(0, 140);
 }
+function count(sec, b, matches) {
+  const first = matches[0];
+  if (!first) return false;
+  if (first.confidence === "high") {
+    sec.ai++;
+    b.ai++;
+    sec.byAgent[first.agentId] = (sec.byAgent[first.agentId] ?? 0) + 1;
+    b.byAgent[first.agentId] = (b.byAgent[first.agentId] ?? 0) + 1;
+  } else {
+    sec.hints++;
+    sec.hintsByAgent[first.agentId] = (sec.hintsByAgent[first.agentId] ?? 0) + 1;
+  }
+  return true;
+}
 function summarizeCommits(items, cls, evidenceLimit) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
@@ -598,12 +612,7 @@ function summarizeCommits(items, cls, evidenceLimit) {
     const b = bucket(months, c2.date);
     b.total++;
     const matches = cls.commit(c2);
-    if (matches.length === 0) continue;
-    sec.ai++;
-    b.ai++;
-    const primary = matches[0].agentId;
-    sec.byAgent[primary] = (sec.byAgent[primary] ?? 0) + 1;
-    b.byAgent[primary] = (b.byAgent[primary] ?? 0) + 1;
+    if (!count(sec, b, matches)) continue;
     if (sec.evidence.length < evidenceLimit) sec.evidence.push(toEvidence(matches[0], c2.sha.slice(0, 7), firstLine(c2.message), c2.date, c2.url));
   }
   sec.byMonth = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
@@ -619,12 +628,7 @@ function summarizePulls(items, cls, evidenceLimit) {
     const b = bucket(months, p.createdAt);
     b.total++;
     const matches = cls.pull(p);
-    if (matches.length === 0) continue;
-    sec.ai++;
-    b.ai++;
-    const primary = matches[0].agentId;
-    sec.byAgent[primary] = (sec.byAgent[primary] ?? 0) + 1;
-    b.byAgent[primary] = (b.byAgent[primary] ?? 0) + 1;
+    if (!count(sec, b, matches)) continue;
     if (sec.evidence.length < evidenceLimit) sec.evidence.push(toEvidence(matches[0], `#${p.number}`, p.title.slice(0, 140), p.createdAt, p.url));
   }
   sec.byMonth = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
@@ -655,7 +659,7 @@ function buildReport(d, opts = {}) {
   const pSec = summarizePulls(d.pulls.items, cls, evidenceLimit);
   pSec.capped = d.pulls.capped;
   return {
-    schema: 1,
+    schema: 2,
     tool: { name: "howmuchai", version: VERSION, registry: registry.version },
     repo: {
       fullName: d.repo.fullName,
@@ -729,6 +733,10 @@ function section(title, sec, unit) {
   const entries = Object.entries(sec.byAgent).sort((a, b) => b[1] - a[1]);
   for (const [id, n] of entries) {
     lines.push(`  ${c.hex(agentColor(id), "\u25A0")} ${agentName(id).padEnd(16)} ${String(n).padStart(5)}  ${c.dim(pct(n, sec.total))}`);
+  }
+  if (sec.hints) {
+    const by = Object.entries(sec.hintsByAgent).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${agentName(id)} ${n}`).join(", ");
+    lines.push(c.dim(`  + ${sec.hints} with only a hint, not counted (${by})`));
   }
   if (sec.capped) lines.push(c.dim(`  read the newest ${sec.total} only (cap reached)`));
   return lines;

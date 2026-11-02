@@ -211,3 +211,21 @@ describe("attribution precedence (#2)", () => {
     expect(r.commits.byAgent).toEqual({ "claude-code": 1, codex: 1 });
   });
 });
+
+describe("hints (#3)", () => {
+  it("does not count a human PR on a codex/ branch, but lists it as a hint", () => {
+    const r = buildReport({ ...data, pulls: { items: [pull({ branch: "codex/example" }), pull({ number: 2 })], capped: false } });
+    expect(r.pulls.ai).toBe(0);
+    expect(r.pulls.hints).toBe(1);
+    expect(r.pulls.hintsByAgent).toEqual({ codex: 1 });
+    expect(r.pulls.evidence[0]?.confidence).toBe("medium");
+  });
+  it("counts an item once when a hint and a signature agree", () => {
+    const r = buildReport({ ...data, pulls: { items: [pull({ branch: "codex/x", authorLogin: "chatgpt-codex-connector[bot]" })], capped: false } });
+    expect(r.pulls.ai).toBe(1);
+    expect(r.pulls.hints).toBe(0);
+  });
+  it("marks reports with the current schema", () => {
+    expect(buildReport(data).schema).toBe(2);
+  });
+});

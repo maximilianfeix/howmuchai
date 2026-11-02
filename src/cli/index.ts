@@ -62,6 +62,10 @@ function section(title: string, sec: Section, unit: string): string[] {
   for (const [id, n] of entries) {
     lines.push(`  ${c.hex(agentColor(id), "■")} ${agentName(id).padEnd(16)} ${String(n).padStart(5)}  ${c.dim(pct(n, sec.total))}`);
   }
+  if (sec.hints) {
+    const by = Object.entries(sec.hintsByAgent).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${agentName(id)} ${n}`).join(", ");
+    lines.push(c.dim(`  + ${sec.hints} with only a hint, not counted (${by})`));
+  }
   if (sec.capped) lines.push(c.dim(`  read the newest ${sec.total} only (cap reached)`));
   return lines;
 }

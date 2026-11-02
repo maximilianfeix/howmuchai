@@ -15,7 +15,7 @@ import { buildReport, DEFAULTS, fetchRepoData, type RepoData } from "../src/core
 import { badgePath, cardPath, reportPath, toEntry, type Board, type BoardEntry } from "../src/core/dataset";
 import { GitHubClient, GitHubError } from "../src/core/github";
 import { renderBadge, renderCard, shieldsJson } from "../src/core/render";
-import type { Report } from "../src/core/types";
+import { REPORT_SCHEMA, type Report } from "../src/core/types";
 
 const args = process.argv.slice(2);
 const arg = (name: string, def: string) => {
@@ -67,7 +67,8 @@ function storedReport(fullName: string): Report | null {
   const p = join(DATA, reportPath(fullName));
   if (!existsSync(p)) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8")) as Report;
+    const rep = JSON.parse(readFileSync(p, "utf8")) as Report;
+    return rep.schema === REPORT_SCHEMA ? rep : null; // older schema: measure again
   } catch {
     return null;
   }
