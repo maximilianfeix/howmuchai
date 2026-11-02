@@ -72,10 +72,14 @@ function section(title: string, sec: Section, unit: string, r: Report): string[]
 }
 
 const NO_ESTIMATE: Record<string, string> = {
-  "no-evidence": "this repo discloses fewer than 5 agent commits and has no agent setup files, and without evidence of agent use a number would be a guess",
+  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
+  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
+  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
+  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
   "all-disclosed": "every commit already carries a signature",
   "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
   inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "too-uncertain": "the possible range would be wider than 50 percentage points",
   "no-commits": "there are no commits in this period",
 };
 

@@ -125,7 +125,7 @@ async function enrich() {
     try {
       raw.setup = await client.agentSetup(raw.repo.fullName);
       const signed = raw.commits.items.filter((c) => cls.commit(c).some((m) => m.confidence === "high")).length;
-      raw.baseline = signed >= GATE_DISCLOSED || raw.setup.length > 0 ? await client.baseline(raw.repo.fullName) : [];
+      raw.baseline = signed >= GATE_DISCLOSED ? await client.baseline(raw.repo.fullName) : [];
       writeAtomic(f, JSON.stringify(raw));
       writeReport(raw);
       n++;

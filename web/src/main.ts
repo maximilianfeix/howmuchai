@@ -343,10 +343,14 @@ function trendHtml(sec: Section): string {
 }
 
 const NO_ESTIMATE: Record<string, string> = {
-  "no-evidence": "this repo discloses fewer than 5 agent commits and has no agent setup files, and without evidence of agent use a number would be a guess",
+  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
+  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
+  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
+  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
   "all-disclosed": "every commit already carries a signature",
   "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
   inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "too-uncertain": "the possible range would be wider than 50 percentage points",
   "no-commits": "there are no commits in this period",
 };
 
@@ -369,7 +373,7 @@ function beyondHtml(r: Report): string {
     const e = b.estimate, l = b.likely;
     head = `<div class="stat">${pc(l.lo)}–${pc(l.hi)} <span class="muted" style="font-size:15px;font-weight:400">likely AI-involved, best estimate ${pc(l.point)}</span></div>
       <div class="bar range" aria-hidden="true"><span style="width:${(100 * (r.share ?? 0)).toFixed(2)}%;background:var(--accent)"></span><span class="band" style="margin-left:${Math.max(0, 100 * l.lo - 100 * (r.share ?? 0)).toFixed(2)}%;width:${(100 * (l.hi - l.lo)).toFixed(2)}%"></span></div>`;
-    explain = `Estimated from the writing style of ${c.total - c.ai - e.tooShort} undisclosed commits, compared with ${e.humanReference === "own-history" ? "this repo's own commits from before July 2022" : "typical human commits from before coding agents"} and ${e.aiReference === "repo" ? "this repo's disclosed agent commits" : "typical agent commits"}. ${e.tooShort} more are too short to carry any style signal; the range treats them as unknown. Made because ${e.gate === "disclosed" ? "the repo already discloses agent use" : "agent setup files were found"}.`;
+    explain = `Estimated from the writing style of ${c.total - c.ai - e.tooShort} undisclosed commits, compared with ${e.humanReference === "own-history" ? "this repo's own commits from before July 2022" : "typical human commits from before coding agents"} and ${e.aiReference === "repo" ? "this repo's disclosed agent commits" : "typical agent commits"}. ${e.tooShort} more are too short to carry any style signal; the range treats them as unknown. Made because the repo already discloses agent use.`;
   } else {
     head = `<div class="stat" style="font-size:22px">No estimate</div>`;
     explain = `No estimate because ${NO_ESTIMATE[b.reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"]}. Careful human writers can look like agents, so howmuchai only estimates where agent use is already evident.`;
@@ -600,7 +604,7 @@ function renderMethod() {
       <li><strong>Agent setup files</strong> on the default branch, such as <code>CLAUDE.md</code>, <code>AGENTS.md</code>, <code>.cursor/</code>, <code>GEMINI.md</code> or <code>.github/copilot-instructions.md</code>. They prove that agents are set up, not how much they wrote.</li>
       <li><strong>A style estimate</strong>: a small logistic model scores each commit message (length, structure, bullets, conventional prefixes, sentence count and more; no names, no dates). It was trained on about 30,000 disclosed agent commits, with the signature removed, and 13,000 commits from before coding agents in the same repositories. The share of the undisclosed commits is estimated by comparing their average score with the repo's own commits from before July 2022 and with its disclosed agent commits (adjusted classify-and-count), with a 90% bootstrap interval.</li>
     </ul>
-    <p><strong>How well it works.</strong> On mixtures of 40 commits with a known AI share the median absolute error is about 6–10 percentage points (less for repos with more commits) and the 90% interval contains the true share in about 96% of cases (<a href="https://github.com/maximilianfeix/howmuchai/blob/main/eval/STYLE.md">eval/STYLE.md</a>). On single commits the model is not reliable enough to judge anyone, and careful human writers (for example in PostgreSQL or QEMU) score like agents. That is why an estimate is only made when agent use is already evident: at least 5 disclosed agent commits or agent setup files.</p>
+    <p><strong>How well it works.</strong> On mixtures of 20 commits with a known AI share the median absolute error is about 3–10 percentage points (less for repos with more commits) and the 90% interval held the true share in all 125 test cases (<a href="https://github.com/maximilianfeix/howmuchai/blob/main/eval/STYLE.md">eval/STYLE.md</a>). On single commits the model is not reliable enough to judge anyone, and careful human writers (for example in PostgreSQL or QEMU) score like agents. That is why an estimate is only made when the repo itself discloses at least 10 agent commits (they show what agent work looks like in that repo) and, if it is older than July 2022, has at least 30 commits from before that date (they show what human work looks like there). Agent setup files are shown as evidence but never enough for an estimate; some company commit formats (for example "Summary: … Test Plan: …") read like agent text.</p>
   </div>
   <div class="prose"><h2>Privacy</h2><p>Lookups run in your browser against the public GitHub API. There is no server, no tracking and no analytics. A token you save stays in your browser.</p></div>`;
 }

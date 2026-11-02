@@ -251,3 +251,12 @@ describe("median (round 2, #29)", () => {
     expect(median([])).toBe(0);
   });
 });
+
+describe("dependency bots under other app names", () => {
+  it("are left out", () => {
+    expect(cls.isIgnoredCommit(commit({ authorLogin: "renovate-sh-app[bot]" }))).toBe(true);
+    expect(cls.isIgnoredCommit(commit({ authorLogin: "dependabot-preview[bot]" }))).toBe(true);
+    expect(cls.isIgnoredPull(pull({ authorLogin: "renovate-sh-app[bot]" }))).toBe(true);
+    expect(cls.isIgnoredCommit(commit({ authorLogin: "renovatio" }))).toBe(false);
+  });
+});

@@ -9,6 +9,7 @@ function createClassifier(reg) {
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
+  const depBot = /^(renovate|dependabot|mend|whitesource|snyk|greenkeeper|depfu|pyup|scala-steward|release-please|changeset|semantic-release)[\w.-]*(\[bot\])?$/i;
   const of = (kind) => signals.filter((s) => s.kind === kind);
   const trailer = of("commit-trailer");
   const message = of("commit-message");
@@ -91,10 +92,11 @@ function createClassifier(reg) {
       if (c2.parents > 1) return true;
       const login = (c2.authorLogin ?? "").toLowerCase();
       const name = (c2.authorName ?? "").toLowerCase();
-      return ignored.has(login) || ignored.has(name);
+      return ignored.has(login) || ignored.has(name) || depBot.test(login) || depBot.test(name);
     },
     isIgnoredPull(p) {
-      return ignored.has((p.authorLogin ?? "").toLowerCase());
+      const login = (p.authorLogin ?? "").toLowerCase();
+      return ignored.has(login) || depBot.test(login);
     }
   };
 }
@@ -903,12 +905,12 @@ function rng(seed) {
   let s = seed >>> 0;
   return () => (s = Math.imul(s, 1103515245) + 12345 >>> 0) / 2 ** 32;
 }
-function prevalence(S, H, A, seed = 42, rounds = 400) {
+function prevalence(S, H, A, seed = 42, rounds = 400, minGap = 0.1) {
   if (S.length === 0) return null;
   const one = (s, h, a) => {
     const hm = typeof h === "number" ? h : mean(h);
     const am = typeof a === "number" ? a : mean(a);
-    if (am - hm < 0.1) return NaN;
+    if (am - hm < minGap) return NaN;
     return Math.min(1, Math.max(0, (mean(s) - hm) / (am - hm)));
   };
   const point = one(S, H, A);
@@ -929,108 +931,92 @@ var style_model_default = {
   version: 1,
   trainedAt: "2026-11-02",
   features: [
-    "log subj len",
-    "log prose len",
-    "has prose",
+    "log subject length (without prefix)",
+    "log prose length",
     "log prose lines",
     "log bullets",
     "log backticks",
-    "md bold/heading",
-    "conventional",
-    "squash (#n)",
+    "markdown bold/heading",
     "em dash/arrow",
     "log sentences",
     "long-line share",
-    "wrapped<=72",
-    "human trailers",
-    "lowercase subj",
-    "log max line",
+    "wrapped at 72",
+    "human review trailers",
+    "log longest line",
     "numbered list",
     "explanatory phrases",
-    "two spaces after period",
-    "avg word len",
+    "two spaces after a full stop",
+    "average word length",
     "first person",
     "informal",
     "identifiers in subject"
   ],
   weights: [
-    1.12411,
-    0.66518,
-    -0.2135,
-    0.71841,
-    -0.54007,
-    -0.0155,
-    0.08998,
-    0.57347,
-    -0.10648,
-    0.40837,
-    1.61855,
-    0.01411,
-    -0.07684,
-    -0.01374,
-    -0.15712,
-    -0.07344,
-    -0.18056,
-    -0.14138,
-    -0.02421,
-    -0.40346,
-    -0.65751,
-    -0.06522,
-    -0.05286
+    0.92682,
+    0.64821,
+    0.72756,
+    -0.49838,
+    -0.01125,
+    0.12157,
+    0.41355,
+    1.57411,
+    0.03238,
+    -0.13282,
+    -0.08048,
+    -0.16266,
+    -0.16342,
+    -0.15175,
+    -0.04372,
+    -0.52831,
+    -0.68795,
+    -0.05423,
+    -0.12757
   ],
-  bias: 0.38149,
+  bias: 0.41991,
   mean: [
-    3.94286,
-    3.39009,
-    0.56957,
-    1.21851,
-    0.44359,
-    0.54899,
-    0.06565,
-    0.29198,
-    0.53306,
-    0.04231,
-    0.77842,
-    0.08069,
-    0.30228,
-    0.08789,
-    0.48137,
-    2.46698,
+    3.76305,
+    3.39044,
+    1.21868,
+    0.44373,
+    0.54917,
+    0.06568,
+    0.04232,
+    0.77867,
+    0.08072,
+    0.30205,
+    0.08792,
+    2.46703,
     0.0103,
-    0.13134,
-    982e-5,
-    1.08312,
-    0.05677,
+    0.13139,
+    983e-5,
+    1.08295,
+    0.05679,
     537e-5,
-    0.15053
+    0.14622
   ],
   scale: [
-    0.51179,
-    3.13249,
-    0.49514,
-    1.34727,
-    0.86293,
-    1.18469,
-    0.24768,
-    0.45467,
-    0.49891,
-    0.20129,
-    1.03193,
-    0.22779,
-    0.45924,
-    0.30543,
-    0.49965,
-    2.18911,
-    0.10094,
-    0.33778,
-    0.09863,
-    0.95477,
-    0.2556,
-    0.07305,
-    0.32805
+    0.52562,
+    3.13294,
+    1.34746,
+    0.86304,
+    1.18484,
+    0.24771,
+    0.20132,
+    1.032,
+    0.22783,
+    0.45915,
+    0.30548,
+    2.18947,
+    0.10096,
+    0.33782,
+    0.09865,
+    0.95487,
+    0.25564,
+    0.07306,
+    0.32422
   ],
-  humanMean: 0.2499,
-  agentMean: 0.7492
+  humanMean: 0.2751,
+  agentMean: 0.724
 };
 
 // src/core/style.ts
@@ -1045,7 +1031,7 @@ var HUMAN_TRAILER = /^(reviewed-by|acked-by|tested-by|reported-by|suggested-by|r
 function features(raw) {
   const m = strip(raw);
   const lines = m.split("\n");
-  const subj = lines[0] ?? "";
+  const subj = (lines[0] ?? "").replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, "").replace(/\s*\(#\d+\)$/, "");
   const rest = lines.slice(1);
   const trailers = rest.filter((l) => TRAILER.test(l.trim()));
   const prose = rest.filter((l) => l.trim() && !TRAILER.test(l.trim()) && !/^\s*(https?:\/\/|\[\d+\]|>)/.test(l));
@@ -1055,19 +1041,15 @@ function features(raw) {
   return [
     l1(subj.length),
     l1(body.length),
-    +(prose.length > 0),
     l1(prose.length),
     l1((body.match(/^\s*[-*•] /gm) ?? []).length),
     l1((m.match(/`/g) ?? []).length),
     +/\*\*[^*]+\*\*|^#{1,3} /m.test(body),
-    +/^(feat|fix|chore|docs|refactor|test|tests|ci|perf|build|style)(\([^)]+\))?!?: /.test(subj),
-    +/\(#\d+\)$/.test(subj),
     +/[—→]/.test(m),
     l1((body.match(/[.!?](\s|$)/g) ?? []).length),
     prose.length ? Math.min(1, prose.filter((l) => l.length > 76).length / prose.length) : 0,
     prose.length ? +prose.every((l) => l.length <= 72) : 0,
     l1(trailers.filter((l) => HUMAN_TRAILER.test(l.trim())).length),
-    +/^[a-z]/.test(subj),
     l1(prose.reduce((mx, l) => l.length > mx ? l.length : mx, 0)),
     +/^\s*\d+\.\s/m.test(body),
     +/\b(this (change|commit|pr|patch)|so that|instead of|which means)\b/i.test(body),
@@ -1082,8 +1064,8 @@ function features(raw) {
   ];
 }
 function isJudgeable(message) {
-  const m = stripSignatures(message);
-  return m.length >= 40 || m.split("\n").filter((l) => l.trim()).length >= 2;
+  const rest = stripSignatures(message).split("\n").slice(1);
+  return rest.some((l) => l.trim().length >= 20 && !TRAILER.test(l.trim()));
 }
 function score(model, message) {
   const x = features(message);
@@ -1194,12 +1176,13 @@ async function fetchRepoData(input, opts = {}) {
     data.setup = await optional(() => client.agentSetup(repo.fullName));
     const cls = createClassifier(registry);
     const disclosed = commits.items.filter((c2) => !cls.isIgnoredCommit(c2) && cls.commit(c2).some((m) => m.confidence === "high")).length;
-    if (disclosed >= GATE_DISCLOSED || (data.setup?.length ?? 0) > 0) data.baseline = await optional(() => client.baseline(repo.fullName));
+    if (disclosed >= GATE_DISCLOSED) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
 }
-var GATE_DISCLOSED = 5;
+var GATE_DISCLOSED = 10;
 var AGENT_ACCOUNT = /\[bot\]$|^(copilot|cursoragent|claude|devin-ai-integration|google-labs-jules|openhands(-agent)?|opencode-agent|capy-ai)$/i;
+var MAX_RANGE = 0.5;
 var MIN_JUDGEABLE = 20;
 function beyondSignatures(d, cls) {
   const items = d.commits.items.filter((c2) => !cls.isIgnoredCommit(c2));
@@ -1224,19 +1207,26 @@ function beyondSignatures(d, cls) {
     model: styleModel.version
   };
   if (items.length === 0) return { ...beyond, reason: "no-commits" };
-  const gate = signed.size >= GATE_DISCLOSED ? "disclosed" : (d.setup?.length ?? 0) > 0 ? "setup" : null;
-  if (!gate) return { ...beyond, reason: "no-evidence" };
-  const undisclosed = items.filter((c2) => !signed.has(c2));
+  if (signed.size < GATE_DISCLOSED) return { ...beyond, reason: (d.setup?.length ?? 0) > 0 ? "setup-only" : "no-evidence" };
+  const gate = "disclosed";
+  const isBot = (c2) => /\[bot\]$/i.test(c2.authorLogin ?? "") || /\[bot\]$/i.test(c2.authorName ?? "");
+  const undisclosed = items.filter((c2) => !signed.has(c2) && !isBot(c2));
   const judged = undisclosed.filter((c2) => isJudgeable(c2.message));
   const short = undisclosed.length - judged.length;
   if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
   const S = judged.map((c2) => score(styleModel, c2.message));
-  const ownHuman = (d.baseline ?? []).filter((c2) => !cls.isIgnoredCommit(c2) && isJudgeable(c2.message));
-  const H = ownHuman.length >= 30 ? ownHuman.map((c2) => score(styleModel, c2.message)) : styleModel.humanMean;
   const signedJudged = [...signed].filter((c2) => isJudgeable(c2.message));
-  const A = signedJudged.length >= 10 ? signedJudged.map((c2) => score(styleModel, c2.message)) : styleModel.agentMean;
-  const p = prevalence(S, H, A);
+  if (signedJudged.length < GATE_DISCLOSED) return { ...beyond, reason: "too-few-disclosed" };
+  const A = signedJudged.map((c2) => score(styleModel, c2.message));
+  const history = (d.baseline ?? []).filter((c2) => !cls.isIgnoredCommit(c2) && !isBot(c2));
+  const ownHuman = history.filter((c2) => isJudgeable(c2.message));
+  let H;
+  if (ownHuman.length >= 30) H = ownHuman.map((c2) => score(styleModel, c2.message));
+  else if (d.baseline && d.baseline.length === 0) H = styleModel.humanMean;
+  else return { ...beyond, reason: "too-little-history" };
+  const p = prevalence(S, H, A, 42, 400, 0.2);
   if (!p) return { ...beyond, reason: "inseparable" };
+  if (p.hi - p.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
   beyond.estimate = {
     ...p,
     gate,
@@ -1352,10 +1342,14 @@ function section(title, sec, unit, r) {
   return lines;
 }
 var NO_ESTIMATE = {
-  "no-evidence": "this repo discloses fewer than 5 agent commits and has no agent setup files, and without evidence of agent use a number would be a guess",
+  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
+  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
+  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
+  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
   "all-disclosed": "every commit already carries a signature",
   "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
   inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "too-uncertain": "the possible range would be wider than 50 percentage points",
   "no-commits": "there are no commits in this period"
 };
 function render(r, evidence) {

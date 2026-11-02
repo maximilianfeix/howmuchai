@@ -25,6 +25,8 @@ export function createClassifier(reg: Registry): Classifier {
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
+  // Dependency and release bots under any app name (renovate-sh-app[bot], dependabot-xyz[bot], ...).
+  const depBot = /^(renovate|dependabot|mend|whitesource|snyk|greenkeeper|depfu|pyup|scala-steward|release-please|changeset|semantic-release)[\w.-]*(\[bot\])?$/i;
 
   const of = (kind: SignalKind) => signals.filter((s) => s.kind === kind);
   const trailer = of("commit-trailer");
@@ -128,10 +130,11 @@ export function createClassifier(reg: Registry): Classifier {
       if (c.parents > 1) return true; // merge commits carry no code of their own
       const login = (c.authorLogin ?? "").toLowerCase();
       const name = (c.authorName ?? "").toLowerCase();
-      return ignored.has(login) || ignored.has(name);
+      return ignored.has(login) || ignored.has(name) || depBot.test(login) || depBot.test(name);
     },
     isIgnoredPull(p) {
-      return ignored.has((p.authorLogin ?? "").toLowerCase());
+      const login = (p.authorLogin ?? "").toLowerCase();
+      return ignored.has(login) || depBot.test(login);
     },
   };
 }

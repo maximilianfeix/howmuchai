@@ -23,12 +23,12 @@ function rng(seed: number) {
 }
 
 /** Mixed scores of undisclosed commits `S`, human reference `H` and AI reference `A` (numbers or a known mean). */
-export function prevalence(S: number[], H: number[] | number, A: number[] | number, seed = 42, rounds = 400): Prevalence | null {
+export function prevalence(S: number[], H: number[] | number, A: number[] | number, seed = 42, rounds = 400, minGap = 0.1): Prevalence | null {
   if (S.length === 0) return null;
   const one = (s: number[], h: number[] | number, a: number[] | number) => {
     const hm = typeof h === "number" ? h : mean(h);
     const am = typeof a === "number" ? a : mean(a);
-    if (am - hm < 0.1) return NaN; // the two references cannot be told apart
+    if (am - hm < minGap) return NaN; // the two references cannot be told apart
     return Math.min(1, Math.max(0, (mean(s) - hm) / (am - hm)));
   };
   const point = one(S, H, A);

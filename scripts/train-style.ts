@@ -71,10 +71,10 @@ let covered = 0, cases = 0;
 for (const g of repos) {
   const m = models[fold.get(g)!]!;
   const hs = human[g]!.filter(judge).map((c) => score(m, c.message)), ds = current[g]!.filter(isAI).filter(judge).map((c) => score(m, c.message));
-  if (hs.length < 80 || ds.length < 60) continue;
+  if (hs.length < 40 || ds.length < 40) continue;
   const base = hs.filter((_, i) => i % 2 === 0), test = hs.filter((_, i) => i % 2 === 1), ref = ds.filter((_, i) => i % 2 === 0), pool = ds.filter((_, i) => i % 2 === 1);
   for (const pi of [0, 0.25, 0.5, 0.75, 1]) {
-    const n = 40, na = Math.round(pi * n);
+    const n = 20, na = Math.round(pi * n);
     if (pool.length < na || test.length < n - na) continue;
     const e = prevalence([...pool.slice(0, na), ...test.slice(0, n - na)], base, ref);
     if (!e) continue;
@@ -93,7 +93,7 @@ for (const f of readdirSync(CONTROL).filter((f) => !f.includes(".old"))) {
   if (!now.length) continue;
   const disclosed = now.filter(isAI).length;
   const e = prevalence(now.filter((c: any) => !isAI(c) && judge(c)).map((c: any) => score(model, c.message)), old.filter(judge).map((c: any) => score(model, c.message)), model.agentMean);
-  ctl.push(`| ${f.replace(".json", "").replace("__", "/")} | ${disclosed} | ${e ? `${pct(e.point)}% (${pct(e.lo)}–${pct(e.hi)})` : "–"} | ${disclosed >= 5 ? "estimated" : "**not estimated** (no disclosed AI)"} |`);
+  ctl.push(`| ${f.replace(".json", "").replace("__", "/")} | ${disclosed} | ${e ? `${pct(e.point)}% (${pct(e.lo)}–${pct(e.hi)})` : "–"} | ${disclosed >= 10 ? "estimated" : "**not estimated** (fewer than 10 disclosed)"} |`);
 }
 
 const lines = [
@@ -113,7 +113,7 @@ const lines = [
   ``,
   `## How well it estimates a share`,
   ``,
-  `Mixtures of 40 commits with a known AI share (messages long enough to judge), built from each repository's own human and agent commits, estimated with a model that never saw that repository and the repository's own pre-2022 commits as the human reference:`,
+  `Mixtures of 20 commits with a known AI share (messages long enough to judge), built from each repository's own human and agent commits, estimated with a model that never saw that repository and the repository's own pre-2022 commits as the human reference:`,
   ``,
   `| True share | Cases | Median absolute error | Mean error (bias) | 90% of errors within |`,
   `|---:|---:|---:|---:|---:|`,
@@ -125,7 +125,7 @@ const lines = [
   ``,
   `## Why there is a gate`,
   ``,
-  `2026 commits of projects with restrictive AI policies, estimated against their own pre-2022 commits. Their writing style changed over the years without any agent (longer review trailers, longer explanations), so an ungated estimate would accuse them. howmuchai therefore only estimates when a repository already discloses some AI use (at least 5 signed commits) or has agent setup files, and labels the result as experimental.`,
+  `2026 commits of projects with restrictive AI policies, estimated against their own pre-2022 commits. Their writing style changed over the years without any agent (longer review trailers, longer explanations), so an ungated estimate would accuse them. howmuchai therefore only estimates when a repository itself discloses AI use (at least 10 signed commits, which become the agent reference) and, if it is older than July 2022, has at least 30 commits from before that date as the human reference. It labels the result as experimental. Agent setup files alone are not enough: in a first run with that rule, repositories such as meta/rocksdb (Meta's \"Summary: … Test Plan:\" commit format) and neovim came out near 100% without a single disclosed agent commit.`,
   ``,
   `| Project | Disclosed AI commits | Ungated estimate | Shown |`,
   `|---|---:|---:|---|`,

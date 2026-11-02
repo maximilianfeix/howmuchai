@@ -6,7 +6,7 @@ import { validateReport } from "../src/core/validate";
 
 const agentMsg = (i: number) =>
   `fix(parser): handle empty option values without crashing the sender ${i}\n\nThe replication protocol allows options without values, but the parser read the argument directly. This change reads both options through the helper, which reports a missing value cleanly and keeps the old behaviour otherwise.\n\n- read proto_version and publication_names through defGetString()\n- add a regression test for both options`;
-const humanMsg = (i: number) => (i % 2 ? `fix the off by one in the tokenizer when input ends early ${i}` : `bump the lockfile and drop the old node 18 workaround ${i}`);
+const humanMsg = (i: number) => (i % 2 ? `Fix tokenizer off by one ${i}\n\nhappens when the input ends early, found by fuzzing` : `Bump lockfile ${i}\n\ndrop the old node 18 workaround while at it`);
 function data(opts: { signed: number; undisclosedAgentStyle: number; human: number; baseline?: number; setup?: { path: string; agentId: string }[] }): RepoData {
   const items: RepoData["commits"]["items"] = [];
   let n = 0;
@@ -53,12 +53,23 @@ describe("beyond signatures", () => {
     expect(r.beyond!.estimate!.point).toBeLessThan(0.1);
   });
 
-  it("uses agent setup files as a gate and the training references when the repo has none", () => {
+  it("never estimates from agent setup files alone", () => {
     const r = buildReport(data({ signed: 0, undisclosedAgentStyle: 30, human: 30, setup: [{ path: "CLAUDE.md", agentId: "claude-code" }] }));
-    expect(r.beyond!.estimate!.gate).toBe("setup");
-    expect(r.beyond!.estimate!.humanReference).toBe("training");
-    expect(r.beyond!.estimate!.aiReference).toBe("training");
+    expect(r.beyond!.estimate).toBeNull();
+    expect(r.beyond!.reason).toBe("setup-only");
     expect(r.beyond!.setup).toEqual([{ path: "CLAUDE.md", agentId: "claude-code" }]);
+  });
+  it("never uses the training data as the agent reference", () => {
+    const r = buildReport(data({ signed: 9, undisclosedAgentStyle: 30, human: 30 }));
+    expect(r.beyond!.estimate).toBeNull();
+  });
+  it("refuses an old repo without enough own history, accepts a young one with none", () => {
+    const old = data({ signed: 20, undisclosedAgentStyle: 30, human: 30 });
+    old.baseline = Array.from({ length: 10 }, (_, i) => ({ sha: `b${i}`, message: "x", date: "2021-01-01T00:00:00Z", url: "https://github.com/o/r/commit/b", parents: 1 }));
+    expect(buildReport(old).beyond!.reason).toBe("too-little-history");
+    const young = data({ signed: 20, undisclosedAgentStyle: 30, human: 30 });
+    young.baseline = [];
+    expect(buildReport(young).beyond!.estimate!.humanReference).toBe("training");
   });
 
   it("counts commits by authors who disclose agent use", () => {
@@ -70,6 +81,13 @@ describe("beyond signatures", () => {
     expect(stripSignatures("x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")).toBe("x");
     expect(isJudgeable("Release 1.5.0")).toBe(false);
     expect(isJudgeable(agentMsg(1))).toBe(true);
+  });
+});
+
+describe("uncertainty guard", () => {
+  it("shows no estimate when the interval would be wider than half the scale", async () => {
+    const { MAX_RANGE } = await import("../src/core/analyze");
+    expect(MAX_RANGE).toBe(0.5);
   });
 });
 
@@ -90,7 +108,7 @@ describe("prevalence", () => {
 
 describe("beyond signatures, review fixes", () => {
   it("treats too-short messages as unknown instead of human", () => {
-    const d = data({ signed: 0, undisclosedAgentStyle: 0, human: 0, setup: [{ path: "AGENTS.md", agentId: "codex" }] });
+    const d = data({ signed: 10, undisclosedAgentStyle: 0, human: 0 });
     for (let i = 0; i < 25; i++) d.commits.items.push({ sha: `t${i}`, message: "fix typo", date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/t${i}`, parents: 1 });
     const r = buildReport(d);
     expect(r.beyond!.estimate).toBeNull();
@@ -107,7 +125,7 @@ describe("beyond signatures, review fixes", () => {
   it("merges a person's login and e-mail and leaves agent accounts out of the author metric", () => {
     const d = data({ signed: 5, undisclosedAgentStyle: 0, human: 0 });
     d.commits.items = d.commits.items.map((c) => ({ ...c, authorLogin: "alice", authorEmail: "alice@example.org" }));
-    d.commits.items.push({ sha: "x1", message: "fix the parser for empty values in options", date: "2026-10-10T00:00:00Z", url: "https://github.com/o/r/commit/x1", authorLogin: null, authorEmail: "alice@example.org", parents: 1 });
+    d.commits.items.push({ sha: "x1", message: "fix the parser\n\nfor empty values in options it crashed", date: "2026-10-10T00:00:00Z", url: "https://github.com/o/r/commit/x1", authorLogin: null, authorEmail: "alice@example.org", parents: 1 });
     d.commits.items.push({ sha: "x2", message: "x\n\nCo-Authored-By: Claude <noreply@anthropic.com>", date: "2026-10-10T00:00:00Z", url: "https://github.com/o/r/commit/x2", authorLogin: "claude[bot]", parents: 1 });
     const r = buildReport(d);
     expect(r.beyond!.authors).toEqual({ aiAuthors: 1, authors: 1, commitsByAiAuthors: 6 });

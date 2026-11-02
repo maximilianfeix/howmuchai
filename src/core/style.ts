@@ -24,7 +24,9 @@ const HUMAN_TRAILER = /^(reviewed-by|acked-by|tested-by|reported-by|suggested-by
 export function features(raw: string): number[] {
   const m = strip(raw);
   const lines = m.split("\n");
-  const subj = lines[0] ?? "";
+  // Project conventions are not style: the conventional-commit prefix and the squash suffix "(#123)" are
+  // removed before measuring (grafana/loki adopted conventional commits in 2024 and looked like an agent).
+  const subj = (lines[0] ?? "").replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, "").replace(/\s*\(#\d+\)$/, "");
   const rest = lines.slice(1);
   const trailers = rest.filter((l) => TRAILER.test(l.trim()));
   const prose = rest.filter((l) => l.trim() && !TRAILER.test(l.trim()) && !/^\s*(https?:\/\/|\[\d+\]|>)/.test(l));
@@ -34,19 +36,15 @@ export function features(raw: string): number[] {
   return [
     l1(subj.length),
     l1(body.length),
-    +(prose.length > 0),
     l1(prose.length),
     l1((body.match(/^\s*[-*•] /gm) ?? []).length),
     l1((m.match(/`/g) ?? []).length),
     +/\*\*[^*]+\*\*|^#{1,3} /m.test(body),
-    +/^(feat|fix|chore|docs|refactor|test|tests|ci|perf|build|style)(\([^)]+\))?!?: /.test(subj),
-    +/\(#\d+\)$/.test(subj),
     +/[—→]/.test(m),
     l1((body.match(/[.!?](\s|$)/g) ?? []).length),
     prose.length ? Math.min(1, prose.filter((l) => l.length > 76).length / prose.length) : 0,
     prose.length ? +prose.every((l) => l.length <= 72) : 0,
     l1(trailers.filter((l) => HUMAN_TRAILER.test(l.trim())).length),
-    +/^[a-z]/.test(subj),
     l1(prose.reduce((mx, l) => (l.length > mx ? l.length : mx), 0)),
     +/^\s*\d+\.\s/m.test(body),
     +/\b(this (change|commit|pr|patch)|so that|instead of|which means)\b/i.test(body),
@@ -57,13 +55,13 @@ export function features(raw: string): number[] {
     l1((subj.match(/[A-Z][a-z]+[A-Z]|[a-z]+_[a-z]+|\w+\(\)/g) ?? []).length), // identifiers in subject
   ];
 }
-export const FEATURE_NAMES = ["log subj len", "log prose len", "has prose", "log prose lines", "log bullets", "log backticks", "md bold/heading", "conventional", "squash (#n)", "em dash/arrow", "log sentences", "long-line share", "wrapped<=72", "human trailers", "lowercase subj", "log max line", "numbered list", "explanatory phrases", "two spaces after period", "avg word len", "first person", "informal", "identifiers in subject"];
-
+export const FEATURE_NAMES = ["log subject length (without prefix)", "log prose length", "log prose lines", "log bullets", "log backticks", "markdown bold/heading", "em dash/arrow", "log sentences", "long-line share", "wrapped at 72", "human review trailers", "log longest line", "numbered list", "explanatory phrases", "two spaces after a full stop", "average word length", "first person", "informal", "identifiers in subject"];
 
 /** Messages this short carry no style signal; they are reported as "too short to judge". */
 export function isJudgeable(message: string): boolean {
-  const m = stripSignatures(message);
-  return m.length >= 40 || m.split("\n").filter((l) => l.trim()).length >= 2;
+  // A one-line message carries too little style to judge; a body line of some length is needed.
+  const rest = stripSignatures(message).split("\n").slice(1);
+  return rest.some((l) => l.trim().length >= 20 && !TRAILER.test(l.trim()));
 }
 
 export interface StyleModel {

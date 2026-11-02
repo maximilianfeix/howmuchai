@@ -152,16 +152,19 @@ export async function fetchRepoData(input: string, opts: AnalyzeOptions = {}): P
     // The baseline costs one request; only fetch it when the gate can pass.
     const cls = createClassifier(registry);
     const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && cls.commit(c).some((m) => m.confidence === "high")).length;
-    if (disclosed >= GATE_DISCLOSED || (data.setup?.length ?? 0) > 0) data.baseline = await optional(() => client.baseline(repo.fullName));
+    if (disclosed >= GATE_DISCLOSED) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
 }
 
 /** Minimum disclosed commits before the experimental estimate is made (see eval/STYLE.md). */
-export const GATE_DISCLOSED = 5;
+export const GATE_DISCLOSED = 10;
 
 /** Accounts of agents themselves; they are not "people who disclose agent use". */
 const AGENT_ACCOUNT = /\[bot\]$|^(copilot|cursoragent|claude|devin-ai-integration|google-labs-jules|openhands(-agent)?|opencode-agent|capy-ai)$/i;
+
+/** Widest interval that is still shown (share points, 0..1). */
+export const MAX_RANGE = 0.5;
 
 /** Minimum judgeable undisclosed commits for an estimate. */
 export const MIN_JUDGEABLE = 20;
@@ -191,20 +194,35 @@ export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
     model: styleModel.version,
   };
   if (items.length === 0) return { ...beyond, reason: "no-commits" };
-  const gate = signed.size >= GATE_DISCLOSED ? "disclosed" : (d.setup?.length ?? 0) > 0 ? "setup" : null;
-  if (!gate) return { ...beyond, reason: "no-evidence" };
-  const undisclosed = items.filter((c) => !signed.has(c));
+  // Only repos that disclose agent use themselves are estimated: their disclosed commits show what agent work
+  // looks like there. Setup files alone are not enough (meta/rocksdb and neovim would come out near 100%).
+  if (signed.size < GATE_DISCLOSED) return { ...beyond, reason: (d.setup?.length ?? 0) > 0 ? "setup-only" : "no-evidence" };
+  const gate = "disclosed" as const;
+  // Bots write in templates; their commits are neither human nor agent writing and stay out of the estimate.
+  const isBot = (c: CommitInput) => /\[bot\]$/i.test(c.authorLogin ?? "") || /\[bot\]$/i.test(c.authorName ?? "");
+  const undisclosed = items.filter((c) => !signed.has(c) && !isBot(c));
   // Only messages long enough to carry style are scored; short ones stay unknown and widen the range.
   const judged = undisclosed.filter((c) => isJudgeable(c.message));
   const short = undisclosed.length - judged.length;
   if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
   const S = judged.map((c) => score(styleModel, c.message));
-  const ownHuman = (d.baseline ?? []).filter((c) => !cls.isIgnoredCommit(c) && isJudgeable(c.message));
-  const H = ownHuman.length >= 30 ? ownHuman.map((c) => score(styleModel, c.message)) : styleModel.humanMean;
+  // What agent work looks like here: always this repo's own disclosed commits, never the training data
+  // (with the training mean, the Linux kernel's long human messages came out at 100%).
   const signedJudged = [...signed].filter((c) => isJudgeable(c.message));
-  const A = signedJudged.length >= 10 ? signedJudged.map((c) => score(styleModel, c.message)) : styleModel.agentMean;
-  const p = prevalence(S, H, A);
+  if (signedJudged.length < GATE_DISCLOSED) return { ...beyond, reason: "too-few-disclosed" };
+  const A = signedJudged.map((c) => score(styleModel, c.message));
+  // What human work looks like here: the repo's own commits from before July 2022. Only a repo without
+  // any such history (created later) may use the training data instead.
+  const history = (d.baseline ?? []).filter((c) => !cls.isIgnoredCommit(c) && !isBot(c));
+  const ownHuman = history.filter((c) => isJudgeable(c.message));
+  let H: number[] | number;
+  if (ownHuman.length >= 30) H = ownHuman.map((c) => score(styleModel, c.message));
+  else if (d.baseline && d.baseline.length === 0) H = styleModel.humanMean;
+  else return { ...beyond, reason: "too-little-history" };
+  const p = prevalence(S, H, A, 42, 400, 0.2);
   if (!p) return { ...beyond, reason: "inseparable" };
+  // A range wider than half the scale says little and is easy to misread.
+  if (p.hi - p.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
   beyond.estimate = {
     ...p,
     gate,
