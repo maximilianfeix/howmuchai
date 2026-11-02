@@ -128,6 +128,55 @@ describe("MCP server", () => {
   });
 });
 
+describe("MCP server, modern protocol (2026-07-28)", () => {
+  const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} };
+  it("answers server/discover with a cacheable DiscoverResult", async () => {
+    const s = createServer({ fetch: fakeFetch({}).f });
+    const r = (await s.handle({ jsonrpc: "2.0", id: "d", method: "server/discover", params: { _meta: meta } }))!.result as any;
+    expect(r).toMatchObject({ resultType: "complete", supportedVersions: ["2026-07-28"], capabilities: { tools: {} }, cacheScope: "public" });
+    expect(typeof r.ttlMs).toBe("number");
+    expect(r._meta["io.modelcontextprotocol/serverInfo"].name).toBe("howmuchai");
+  });
+  it("marks modern results complete and tools/list cacheable", async () => {
+    const s = createServer({ fetch: fakeFetch({}).f });
+    const r = (await s.handle({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta: meta } }))!.result as any;
+    expect(r.resultType).toBe("complete");
+    expect(r.tools).toHaveLength(4);
+    expect(r.cacheScope).toBeDefined();
+    const c = (await s.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_signatures", arguments: {}, _meta: meta } }))!.result as any;
+    expect(c.resultType).toBe("complete");
+    expect(c.isError).toBe(false);
+  });
+  it("rejects unsupported versions with -32022 and missing capabilities with -32602", async () => {
+    const s = createServer({ fetch: fakeFetch({}).f });
+    const e1 = (await s.handle({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta: { ...meta, "io.modelcontextprotocol/protocolVersion": "2099-01-01" } } }))!.error!;
+    expect(e1.code).toBe(-32022);
+    expect((e1.data as any).requested).toBe("2099-01-01");
+    const e2 = (await s.handle({ jsonrpc: "2.0", id: 2, method: "tools/list", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } }))!.error!;
+    expect(e2.code).toBe(-32602);
+  });
+  it("legacy replies carry no modern fields", async () => {
+    const s = createServer({ fetch: fakeFetch({}).f });
+    const r = (await s.handle({ jsonrpc: "2.0", id: 1, method: "tools/list" }))!.result as any;
+    expect(r.resultType).toBeUndefined();
+  });
+  it("stops a cancelled measurement and sends no answer for it", async () => {
+    let seen: AbortSignal | undefined;
+    const s = createServer({
+      fetch: fakeFetch({}).f,
+      github: (signal) => {
+        seen = signal;
+        return { repo: () => new Promise((_, rej) => signal!.addEventListener("abort", () => rej(new Error("aborted")))) } as any;
+      },
+    });
+    const pending = s.handle(call("measure_repo", { repo: "o/r", live: true }, 7));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await s.handle({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 7 } })).toBeNull();
+    expect(seen?.aborted).toBe(true);
+    expect(await pending).toBeNull();
+  });
+});
+
 describe.skipIf(!existsSync("dist/cli.mjs"))("MCP over stdio (built CLI)", () => {
   it("speaks newline-delimited JSON-RPC and keeps stdout clean", async () => {
     const child = spawn(process.execPath, ["dist/cli.mjs", "mcp"], { stdio: ["pipe", "pipe", "pipe"] });

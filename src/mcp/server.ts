@@ -17,8 +17,13 @@ import type { Report } from "../core/types";
 import { validateBoard, validateReport } from "../core/validate";
 
 export const SITE = "https://maximilianfeix.github.io/howmuchai";
-/** Newest first. The answer to initialize is the client's version when listed here, else the newest. */
+/** Legacy (initialize handshake), newest first. initialize echoes the client's version when listed, else the newest. */
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
+/** Modern (no handshake; every request names its version in _meta), answered by server/discover. */
+export const MODERN_VERSIONS = ["2026-07-28"] as const;
+const META_VERSION = "io.modelcontextprotocol/protocolVersion";
+const META_CAPS = "io.modelcontextprotocol/clientCapabilities";
+const META_SERVER = "io.modelcontextprotocol/serverInfo";
 
 interface Response {
   jsonrpc: "2.0";
@@ -30,8 +35,8 @@ interface Response {
 export interface ServerDeps {
   /** fetch for the published site data (stored reports, leaderboard). */
   fetch?: typeof fetch;
-  /** GitHub client for live measurements. */
-  github?: () => GitHubClient;
+  /** GitHub client for live measurements; the signal aborts it when the client cancels the request. */
+  github?: (signal?: AbortSignal) => GitHubClient;
   token?: string | null;
 }
 
@@ -190,7 +195,10 @@ export function summarize(r: Report, evidence: number, source: "stored" | "live"
 export function createServer(deps: ServerDeps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const token = deps.token ?? null;
-  const github = deps.github ?? (() => new GitHubClient({ token, userAgent: `howmuchai-mcp/${VERSION}`, attempts: 3, maxWaitMs: 30_000, timeoutMs: 30_000 }));
+  const github = deps.github ?? ((signal?: AbortSignal) => new GitHubClient({ token, userAgent: `howmuchai-mcp/${VERSION}`, attempts: 3, maxWaitMs: 30_000, timeoutMs: 30_000, signal }));
+  const SERVER_INFO = { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE };
+  /** Requests in flight, by id, so notifications/cancelled can stop them. */
+  const inflight = new Map<string | number, AbortController>();
   const cls = createClassifier(registry);
   let board: Promise<Board> | null = null;
   let boardAt = 0;
@@ -221,7 +229,7 @@ export function createServer(deps: ServerDeps = {}) {
     }
   }
 
-  async function measure(args: Record<string, unknown>) {
+  async function measure(args: Record<string, unknown>, signal?: AbortSignal) {
     const repo = parseRepo(str(args, "repo", true)!);
     if (!repo) throw new ToolError("Not a GitHub repository. Use owner/repo or a github.com URL.");
     const live = bool(args, "live");
@@ -233,7 +241,7 @@ export function createServer(deps: ServerDeps = {}) {
       if (v?.ok) return summarize(v.value, evidence, "stored");
     }
     try {
-      return summarize(await analyzeRepo(repo, { client: github(), days }), evidence, "live");
+      return summarize(await analyzeRepo(repo, { client: github(signal), days }), evidence, "live");
     } catch (e) {
       if (e instanceof GitHubError && e.status === 404) throw new ToolError(`Repository not found or private: ${repo}`);
       if (e instanceof GitHubError && (e.resetAt || e.secondary))
@@ -321,14 +329,14 @@ export function createServer(deps: ServerDeps = {}) {
     return { content: [{ type: "text", text: out.text }], ...(out.structured !== undefined ? { structuredContent: out.structured } : {}), isError };
   }
 
-  async function callTool(name: unknown, args: unknown) {
+  async function callTool(name: unknown, args: unknown, signal?: AbortSignal) {
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) return null;
     if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) return toolResult({ text: "Arguments must be an object" }, true);
     const a = (args ?? {}) as Record<string, unknown>;
     try {
       onlyKnown(a, tool);
-      const out = tool.name === "measure_repo" ? await measure(a) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
+      const out = tool.name === "measure_repo" ? await measure(a, signal) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
       return toolResult(out, false);
     } catch (e) {
       if (e instanceof ToolError) return toolResult({ text: e.message }, true);
@@ -336,41 +344,65 @@ export function createServer(deps: ServerDeps = {}) {
     }
   }
 
-  /** Handles one message. Returns the response, or null for notifications and for responses sent to us. */
+  /** Handles one message. Returns the response, or null for notifications, responses sent to us and cancelled requests. */
   async function handle(msg: unknown): Promise<Response | null> {
     if (typeof msg !== "object" || msg === null || Array.isArray(msg)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
     const m = msg as { id?: unknown; method?: unknown; params?: unknown; result?: unknown; error?: unknown };
     const hasId = typeof m.id === "string" || typeof m.id === "number";
+    const params = (typeof m.params === "object" && m.params !== null && !Array.isArray(m.params) ? m.params : {}) as Record<string, unknown>;
     if (typeof m.method !== "string") {
       if (hasId && ("result" in m || "error" in m)) return null;
       return { jsonrpc: "2.0", id: hasId ? (m.id as string | number) : null, error: { code: -32600, message: "Invalid Request" } };
     }
-    if (!hasId) return null; // notification: initialized, cancelled, ...
+    if (!hasId) {
+      // Notifications never get an answer. Cancellation stops the request and suppresses its answer.
+      if (m.method === "notifications/cancelled" && (typeof params.requestId === "string" || typeof params.requestId === "number")) inflight.get(params.requestId)?.abort();
+      return null;
+    }
     const id = m.id as string | number;
-    const ok = (result: unknown): Response => ({ jsonrpc: "2.0", id, result });
-    const params = (typeof m.params === "object" && m.params !== null && !Array.isArray(m.params) ? m.params : {}) as Record<string, unknown>;
+    const fail = (code: number, message: string, data?: unknown): Response => ({ jsonrpc: "2.0", id, error: { code, message, ...(data !== undefined ? { data } : {}) } });
+
+    // Modern requests (2026-07-28) carry their version in _meta; legacy ones went through initialize.
+    const meta = (typeof params._meta === "object" && params._meta !== null ? params._meta : {}) as Record<string, unknown>;
+    const modern = META_VERSION in meta || m.method === "server/discover";
+    if (modern && m.method !== "server/discover") {
+      const v = meta[META_VERSION];
+      if (typeof v !== "string") return fail(-32602, `Invalid params: _meta["${META_VERSION}"] must be a string`);
+      if (!(MODERN_VERSIONS as readonly string[]).includes(v)) return fail(-32022, "Unsupported protocol version", { supported: [...MODERN_VERSIONS, ...PROTOCOL_VERSIONS], requested: v.slice(0, 50) });
+      if (typeof meta[META_CAPS] !== "object" || meta[META_CAPS] === null) return fail(-32602, `Invalid params: _meta["${META_CAPS}"] is required`);
+    }
+    const ok = (result: Record<string, unknown>, cacheable = false): Response => ({
+      jsonrpc: "2.0",
+      id,
+      result: modern ? { ...result, resultType: "complete", ...(cacheable ? { ttlMs: 3_600_000, cacheScope: "public" } : {}), _meta: { [META_SERVER]: SERVER_INFO } } : result,
+    });
+
     switch (m.method) {
+      case "server/discover":
+        return ok({ supportedVersions: [...MODERN_VERSIONS], capabilities: { tools: {} }, instructions: INSTRUCTIONS }, true);
       case "initialize": {
         const asked = params.protocolVersion;
         const version = typeof asked === "string" && (PROTOCOL_VERSIONS as readonly string[]).includes(asked) ? asked : PROTOCOL_VERSIONS[0];
-        return ok({
-          protocolVersion: version,
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE },
-          instructions: INSTRUCTIONS,
-        });
+        return ok({ protocolVersion: version, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
       }
       case "ping":
         return ok({});
       case "tools/list":
-        return ok({ tools: TOOLS });
+        return ok({ tools: TOOLS }, true);
       case "tools/call": {
-        const r = await callTool(params.name, params.arguments);
-        if (!r) return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown tool: ${String(params.name).slice(0, 100)}` } };
-        return ok(r);
+        const ctrl = new AbortController();
+        inflight.set(id, ctrl);
+        try {
+          const r = await callTool(params.name, params.arguments, ctrl.signal);
+          if (ctrl.signal.aborted) return null;
+          if (!r) return fail(-32602, `Unknown tool: ${String(params.name).slice(0, 100)}`);
+          return ok(r);
+        } finally {
+          inflight.delete(id);
+        }
       }
       default:
-        return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${m.method.slice(0, 100)}` } };
+        return fail(-32601, `Method not found: ${m.method.slice(0, 100)}`);
     }
   }
 
