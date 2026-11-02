@@ -6,10 +6,8 @@ permissions:
   contents: write
   issues: write
   actions: write
-concurrency:
-  # Same group as the crawl in site.yml: one writer of the data branch at a time.
-  group: data
-  cancel-in-progress: false
+# No concurrency group: a pending run in a shared group would be cancelled by the next one, and the
+# request would be lost. Each request writes its own files and push-data.sh rebases on conflicts.
 jobs:
   track:
     if: contains(github.event.issue.labels.*.name, 'track-request')

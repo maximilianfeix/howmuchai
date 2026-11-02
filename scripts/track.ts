@@ -2,7 +2,7 @@
  * Handles a "track this repo" issue: validates the repository, adds it to tracked.json, measures it
  * right away, answers with the badge code and closes the issue.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, fetchRepoData, parseRepo } from "../src/core/analyze";
 import { badgePath, cardPath, pagePath, reportPath } from "../src/core/dataset";
@@ -27,6 +27,12 @@ function answer(text: string, reason: "completed" | "not planned", changed = fal
   writeAtomic(process.env.ANSWER_FILE ?? "answer.json", JSON.stringify({ body: text, reason, changed }));
 }
 
+function countTracked(): number {
+  const dir = join(DATA, "tracked");
+  if (!existsSync(dir)) return 0;
+  return readdirSync(dir).reduce((n, owner) => n + readdirSync(join(dir, owner)).length, 0);
+}
+
 function write(rel: string, content: string) {
   writeAtomic(join(DATA, rel), content);
 }
@@ -39,9 +45,8 @@ async function main() {
     answer("I could not read a repository from this issue. Please use the form and enter `owner/repo`.", "not planned");
     return;
   }
-  const trackedFile = join(DATA, "tracked.json");
-  const tracked = existsSync(trackedFile) ? (JSON.parse(readFileSync(trackedFile, "utf8")) as { repos: string[] }) : { repos: [] };
-  if (tracked.repos.length >= MAX_TRACKED) {
+  // One file per tracked repo (tracked/<owner>/<repo>.json), so parallel requests never touch the same file.
+  if (countTracked() >= MAX_TRACKED) {
     answer("The tracking list is full for now. You can still run the GitHub Action in your own repo: https://github.com/maximilianfeix/howmuchai#github-action", "not planned");
     return;
   }
@@ -57,8 +62,7 @@ async function main() {
   const v = validateReport(r);
   if (!v.ok) throw new Error(`invalid report: ${v.errors.join("; ")}`);
   const name = r.repo.fullName;
-  if (!tracked.repos.some((x) => x.toLowerCase() === name.toLowerCase())) tracked.repos.push(name);
-  write("tracked.json", JSON.stringify(tracked, null, 1) + "\n");
+  write(`tracked/${name.toLowerCase()}.json`, JSON.stringify({ repo: name, requestedAt: new Date().toISOString() }) + "\n");
   write(reportPath(name), JSON.stringify(r) + "\n");
   write(badgePath(name), renderBadge(r));
   write(badgePath(name).replace(/\.svg$/, ".json"), JSON.stringify(shieldsJson(r)));
