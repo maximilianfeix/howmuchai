@@ -21,8 +21,16 @@ function createClassifier(reg) {
   function lines(text) {
     if (!text) return [];
     const out = [];
+    let fence = null;
     for (const raw of text.slice(0, 262144).split("\n")) {
       const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      const f = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
+      if (f) {
+        if (fence === null) fence = f[1][0];
+        else if (f[1][0] === fence) fence = null;
+        continue;
+      }
+      if (fence !== null) continue;
       if (line.length > 0 && line.length <= MAX_LINE) out.push(line);
     }
     return out;
@@ -180,37 +188,44 @@ var GitHubClient = class {
     const timer = ctrl ? setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 3e4) : null;
     const onAbort = () => ctrl?.abort();
     this.opts.signal?.addEventListener("abort", onAbort);
-    let res;
     try {
-      res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
-    } catch (e) {
-      if (this.opts.signal?.aborted) throw new AbortedError();
-      throw new NetworkError(e instanceof Error ? e.message : String(e));
+      let res;
+      try {
+        res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
+      } catch (e) {
+        if (this.opts.signal?.aborted) throw new AbortedError();
+        throw new NetworkError(e instanceof Error ? e.message : String(e));
+      }
+      this.requests++;
+      const limit = Number(res.headers.get("x-ratelimit-limit"));
+      const remaining = Number(res.headers.get("x-ratelimit-remaining"));
+      const reset = Number(res.headers.get("x-ratelimit-reset"));
+      const resource = res.headers.get("x-ratelimit-resource") ?? "core";
+      if (resource === "core" && res.headers.has("x-ratelimit-limit")) this.lastRate = { limit, remaining, reset };
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (body.message) msg = body.message;
+        } catch {
+        }
+        const primary = (res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0";
+        const secondary = (res.status === 403 || res.status === 429) && !primary && (/secondary rate limit|abuse/i.test(msg) || res.headers.has("retry-after") || res.status === 429);
+        throw new GitHubError(msg, res.status, primary ? reset || null : null, {
+          secondary,
+          retryAfter: parseRetryAfter(res.headers.get("retry-after"), Date.now())
+        });
+      }
+      try {
+        return await res.json();
+      } catch (e) {
+        if (this.opts.signal?.aborted) throw new AbortedError();
+        throw new NetworkError(`reading the response failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     } finally {
       if (timer) clearTimeout(timer);
       this.opts.signal?.removeEventListener("abort", onAbort);
     }
-    this.requests++;
-    const limit = Number(res.headers.get("x-ratelimit-limit"));
-    const remaining = Number(res.headers.get("x-ratelimit-remaining"));
-    const reset = Number(res.headers.get("x-ratelimit-reset"));
-    const resource = res.headers.get("x-ratelimit-resource") ?? "core";
-    if (resource === "core" && res.headers.has("x-ratelimit-limit")) this.lastRate = { limit, remaining, reset };
-    if (!res.ok) {
-      let msg = `${res.status} ${res.statusText}`;
-      try {
-        const body = await res.json();
-        if (body.message) msg = body.message;
-      } catch {
-      }
-      const primary = (res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0";
-      const secondary = (res.status === 403 || res.status === 429) && !primary && (/secondary rate limit|abuse/i.test(msg) || res.headers.has("retry-after") || res.status === 429);
-      throw new GitHubError(msg, res.status, primary ? reset || null : null, {
-        secondary,
-        retryAfter: parseRetryAfter(res.headers.get("retry-after"), Date.now())
-      });
-    }
-    return await res.json();
   }
   async repo(fullName) {
     const r = await this.get(`/repos/${fullName}`);

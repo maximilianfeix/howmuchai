@@ -42,8 +42,17 @@ export function createClassifier(reg: Registry): Classifier {
   function lines(text: string | null | undefined): string[] {
     if (!text) return [];
     const out: string[] = [];
+    let fence: string | null = null;
     for (const raw of text.slice(0, 262_144).split("\n")) {
       const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      // Lines inside fenced code blocks are examples, not signatures (docs often show the trailers).
+      const f = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
+      if (f) {
+        if (fence === null) fence = f[1]![0]!;
+        else if (f[1]![0] === fence) fence = null;
+        continue;
+      }
+      if (fence !== null) continue;
       if (line.length > 0 && line.length <= MAX_LINE) out.push(line);
     }
     return out;

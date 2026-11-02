@@ -54,6 +54,7 @@ function checkSection(s: unknown, path: string, errors: string[]) {
         errors.push(`${path}.byMonth has a bad entry`);
         continue;
       }
+      if (counts(m.byAgent, `${path}.byMonth[${m.month}].byAgent`, errors) !== m.ai) errors.push(`${path}.byMonth[${m.month}].byAgent does not add up`);
       total += m.total as number;
       ai += m.ai as number;
     }
@@ -92,6 +93,10 @@ function checkEntry(e: unknown, i: number, errors: string[]) {
   if (typeof x.fullName !== "string" || !REPO.test(x.fullName)) errors.push(`repos[${i}].fullName is not owner/repo`);
   for (const f of ["stars", "ai", "total", "prAi", "prTotal"] as const) if (!isCount(x[f])) errors.push(`repos[${i}].${f} is not a count`);
   if (isCount(x.ai) && isCount(x.total) && x.ai > x.total) errors.push(`repos[${i}].ai is larger than total`);
+  if (isCount(x.ai) && counts(x.byAgent, `repos[${i}].byAgent`, errors) !== x.ai) errors.push(`repos[${i}].byAgent does not add up to ai`);
+  if (x.share !== null && (typeof x.share !== "number" || !Number.isFinite(x.share) || x.share < 0 || x.share > 1)) errors.push(`repos[${i}].share is not between 0 and 1`);
+  if (x.top !== null && typeof x.top !== "string") errors.push(`repos[${i}].top is not an agent id`);
+  if (typeof x.capped !== "boolean") errors.push(`repos[${i}].capped is not a boolean`);
   if (!isDate(x.measuredAt)) errors.push(`repos[${i}].measuredAt is not a date`);
   if (x.cohort !== undefined && x.cohort !== "top" && x.cohort !== "tracked") errors.push(`repos[${i}].cohort is unknown`);
 }
@@ -115,6 +120,17 @@ export function validateRepoData(v: unknown): Checked<unknown> {
   const d = v as Record<string, any>;
   if (!isObj(d.repo) || typeof d.repo.fullName !== "string" || !REPO.test(d.repo.fullName)) errors.push("repo.fullName is not owner/repo");
   for (const k of ["commits", "pulls"]) if (!isObj(d[k]) || !Array.isArray(d[k].items) || typeof d[k].capped !== "boolean") errors.push(`${k} is invalid`);
+  const str = (v: unknown) => typeof v === "string";
+  const optStr = (v: unknown) => v === undefined || v === null || typeof v === "string";
+  if (isObj(d.commits) && Array.isArray(d.commits.items))
+    d.commits.items.forEach((c: any, i: number) => {
+      if (!isObj(c) || !str(c.sha) || !str(c.message) || !str(c.date) || !str(c.url) || typeof c.parents !== "number") return errors.push(`commits.items[${i}] is invalid`);
+      for (const f of ["authorName", "authorEmail", "authorLogin", "committerName", "committerEmail", "committerLogin"]) if (!optStr(c[f])) errors.push(`commits.items[${i}].${f} is not text`);
+    });
+  if (isObj(d.pulls) && Array.isArray(d.pulls.items))
+    d.pulls.items.forEach((p: any, i: number) => {
+      if (!isObj(p) || typeof p.number !== "number" || !str(p.title) || !str(p.branch) || !str(p.createdAt) || !str(p.url) || !optStr(p.body) || !optStr(p.authorLogin)) errors.push(`pulls.items[${i}] is invalid`);
+    });
   if (!isDate(d.since) || !isDate(d.until) || !isCount(d.days)) errors.push("window is invalid");
   return errors.length ? { ok: false, errors } : { ok: true, value: v };
 }

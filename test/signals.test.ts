@@ -68,3 +68,20 @@ describe("adversarial input", () => {
     expect(performance.now() - t0).toBeLessThan(500);
   });
 });
+
+describe("fenced code blocks (round 2, #27)", () => {
+  const cls = createClassifier(registry);
+  const pull = (body: string) => cls.pull({ number: 1, title: "t", body, authorLogin: "dev", branch: "docs/x", createdAt: "", mergedAt: null, url: "u" });
+  it("does not count trailers or footers shown as examples", () => {
+    expect(pull("Docs:\n\n```\nCo-authored-by: Claude <noreply@anthropic.com>\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n```\n")).toEqual([]);
+    expect(pull("~~~text\nAssisted-by: Claude Code\n~~~")).toEqual([]);
+    const c = cls.commit({ sha: "a", date: "", url: "u", parents: 1, message: "docs: trailer format\n\n```\nCo-Authored-By: Claude <noreply@anthropic.com>\n```" });
+    expect(c).toEqual([]);
+  });
+  it("still counts a real footer after a code block", () => {
+    expect(pull("Example:\n```js\nx()\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)").map((m) => m.agentId)).toEqual(["claude-code"]);
+  });
+  it("treats an unclosed fence as code until the end", () => {
+    expect(pull("```\nCo-authored-by: Claude <noreply@anthropic.com>")).toEqual([]);
+  });
+});
