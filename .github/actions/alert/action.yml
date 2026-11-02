@@ -1,0 +1,24 @@
+name: Alert
+description: Opens (or comments on) one open issue labelled "alert" per title, with a link to the failed run.
+inputs:
+  title:
+    description: Issue title
+    required: true
+  details:
+    description: What failed
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TITLE: ${{ inputs.title }}
+        DETAILS: ${{ inputs.details }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        gh label create alert --color B60205 --description "Automated failure alert" 2>/dev/null || true
+        body=$(printf '%s\n\nRun: %s' "${DETAILS:-The workflow failed.}" "$RUN_URL")
+        n=$(gh issue list --label alert --state open --search "in:title \"$TITLE\"" --json number,title --jq "map(select(.title == env.TITLE))[0].number // empty")
+        if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --title "$TITLE" --label alert --body "$body"; fi

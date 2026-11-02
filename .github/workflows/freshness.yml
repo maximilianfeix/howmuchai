@@ -1,0 +1,30 @@
+name: Freshness
+on:
+  schedule:
+    - cron: "40 7 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          ref: data
+          path: .data
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Leaderboard is fresh and complete
+        run: npx tsx scripts/freshness.ts .data/data/leaderboard.json
+      - name: Alert on failure
+        if: failure()
+        uses: ./.github/actions/alert
+        with:
+          title: "Leaderboard is stale"
+          details: "The leaderboard is older than 48 hours, too many measurements are stale, or it is invalid. Check the hourly crawl."

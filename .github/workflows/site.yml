@@ -15,6 +15,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Every job that writes the data branch shares this group, so writers never race.
+    concurrency:
+      group: data
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -34,18 +38,19 @@ jobs:
         run: npx tsx scripts/crawl.ts --data .data --max 100 --reserve 120 --concurrency 2
       - name: Save data
         if: github.event_name != 'push'
-        working-directory: .data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet || { git commit -q -m "data: $(date -u +%Y-%m-%dT%H:%MZ)" && git push -q; }
+        run: scripts/push-data.sh .data "data: $(date -u +%Y-%m-%dT%H:%MZ)"
       - name: Build site
         run: npm run site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist/site
+      - name: Alert on failure
+        if: failure() && github.event_name != 'pull_request'
+        uses: ./.github/actions/alert
+        with:
+          title: "Crawl or site build is failing"
+          details: "The hourly crawl or the site build failed. The live site keeps the last good version."
   deploy:
     needs: build
     runs-on: ubuntu-latest
