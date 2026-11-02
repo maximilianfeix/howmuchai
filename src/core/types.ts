@@ -137,6 +137,8 @@ export interface Beyond {
   };
   /** Disclosed plus estimated, as a share of all commits; null without an estimate. */
   likely: null | { point: number; lo: number; hi: number };
+  /** Why there is no estimate; null when there is one. Missing in early reports. */
+  reason?: null | "no-commits" | "no-evidence" | "all-disclosed" | "too-few-judgeable" | "inseparable";
   model: number;
 }
 

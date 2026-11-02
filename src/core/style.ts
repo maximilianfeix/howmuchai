@@ -8,7 +8,14 @@ const SIG_TEXT = /generated (with|by)|claude\.ai\/code|🤖|cursor\.com|devin\.a
 
 /** The message without any line that could carry an agent signature. */
 export function stripSignatures(m: string): string {
-  return m.split("\n").filter((l) => !SIG.test(l) && !SIG_TEXT.test(l)).join("\n").trim();
+  return m
+    .slice(0, 65_536)
+    .split("\n")
+    .filter((l) => !SIG.test(l) && !SIG_TEXT.test(l))
+    .join("\n")
+    .replace(/^aider: /i, "")
+    .replace(/ \(aider\)$/im, "")
+    .trim();
 }
 const strip = stripSignatures;
 
@@ -40,7 +47,7 @@ export function features(raw: string): number[] {
     prose.length ? +prose.every((l) => l.length <= 72) : 0,
     l1(trailers.filter((l) => HUMAN_TRAILER.test(l.trim())).length),
     +/^[a-z]/.test(subj),
-    l1(Math.max(0, ...prose.map((l) => l.length))),
+    l1(prose.reduce((mx, l) => (l.length > mx ? l.length : mx), 0)),
     +/^\s*\d+\.\s/m.test(body),
     +/\b(this (change|commit|pr|patch)|so that|instead of|which means)\b/i.test(body),
     +/[a-z]\.  [A-Z]/.test(m), // two spaces after a full stop

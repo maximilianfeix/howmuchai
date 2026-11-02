@@ -71,6 +71,14 @@ function section(title: string, sec: Section, unit: string, r: Report): string[]
   return lines;
 }
 
+const NO_ESTIMATE: Record<string, string> = {
+  "no-evidence": "this repo discloses fewer than 5 agent commits and has no agent setup files, and without evidence of agent use a number would be a guess",
+  "all-disclosed": "every commit already carries a signature",
+  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
+  inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "no-commits": "there are no commits in this period",
+};
+
 function render(r: Report, evidence: boolean): string {
   const lines = [
     "",
@@ -87,9 +95,9 @@ function render(r: Report, evidence: boolean): string {
     lines.push(`${c.bold("Beyond signatures")} ${c.dim("(experimental)")}`);
     if (b.estimate && b.likely) {
       lines.push(`  likely ${c.bold(`${pc(b.likely.lo)}–${pc(b.likely.hi)}`)} AI-involved, best estimate ${pc(b.likely.point)}`);
-      lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
+      lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai - b.estimate.tooShort} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
     } else {
-      lines.push(c.dim("  no estimate: fewer than 5 disclosed agent commits and no agent setup files"));
+      lines.push(c.dim(`  no estimate: ${NO_ESTIMATE[b.reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"]}`));
     }
     if (b.authors.aiAuthors) lines.push(`  ${pc(b.authors.commitsByAiAuthors / r.commits.total)} of commits by ${b.authors.aiAuthors}/${b.authors.authors} authors who disclose agent use here`);
     if (b.setup) lines.push(`  agent setup files: ${b.setup.length ? b.setup.map((s) => s.path).join(", ") : "none"}`);

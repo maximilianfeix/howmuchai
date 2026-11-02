@@ -141,7 +141,7 @@ Beyond signatures (experimental)
   98% of commits by 1/6 authors who disclose agent use here
 ```
 
-On mixtures with a known AI share the median error is about 1–2 percentage points and the interval holds the true share in about 95% of cases. Single commits cannot be judged reliably, and careful human writers score like agents, so an estimate is only made where agent use is already evident (at least 5 disclosed agent commits or agent setup files). Details and all numbers: [`eval/STYLE.md`](eval/STYLE.md).
+On mixtures of 40 commits with a known AI share the median absolute error is about 6–10 percentage points (less for repos with more commits) and the 90% interval holds the true share in about 96% of cases. Single commits cannot be judged reliably, and careful human writers score like agents, so an estimate is only made where agent use is already evident (at least 5 disclosed agent commits or agent setup files). Details and all numbers: [`eval/STYLE.md`](eval/STYLE.md).
 
 ## FAQ
 

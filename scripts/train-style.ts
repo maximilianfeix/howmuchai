@@ -14,6 +14,7 @@ import { createClassifier } from "../src/core/classify";
 import { prevalence } from "../src/core/estimate";
 import { registry } from "../src/core/registry";
 import { FEATURE_NAMES, features, isJudgeable, score, type StyleModel } from "../src/core/style";
+const judge = (c: any) => isJudgeable(c.message);
 
 const arg = (n: string, d: string) => (process.argv.includes(n) ? process.argv[process.argv.indexOf(n) + 1]! : d);
 const RAW = arg("--raw", ".work/raw"), HUMAN = arg("--human", ".work/human"), CONTROL = arg("--control", ".work/control");
@@ -69,7 +70,7 @@ const mix: Record<string, number[]> = { "0": [], "0.25": [], "0.5": [], "0.75": 
 let covered = 0, cases = 0;
 for (const g of repos) {
   const m = models[fold.get(g)!]!;
-  const hs = human[g]!.map((c) => score(m, c.message)), ds = current[g]!.filter(isAI).map((c) => score(m, c.message));
+  const hs = human[g]!.filter(judge).map((c) => score(m, c.message)), ds = current[g]!.filter(isAI).filter(judge).map((c) => score(m, c.message));
   if (hs.length < 80 || ds.length < 60) continue;
   const base = hs.filter((_, i) => i % 2 === 0), test = hs.filter((_, i) => i % 2 === 1), ref = ds.filter((_, i) => i % 2 === 0), pool = ds.filter((_, i) => i % 2 === 1);
   for (const pi of [0, 0.25, 0.5, 0.75, 1]) {
@@ -91,7 +92,7 @@ for (const f of readdirSync(CONTROL).filter((f) => !f.includes(".old"))) {
   const old = JSON.parse(readFileSync(join(CONTROL, f.replace(".json", ".old.json")), "utf8")).items.filter((c: any) => usable(c));
   if (!now.length) continue;
   const disclosed = now.filter(isAI).length;
-  const e = prevalence(now.filter((c: any) => !isAI(c)).map((c: any) => score(model, c.message)), old.map((c: any) => score(model, c.message)), model.agentMean);
+  const e = prevalence(now.filter((c: any) => !isAI(c) && judge(c)).map((c: any) => score(model, c.message)), old.filter(judge).map((c: any) => score(model, c.message)), model.agentMean);
   ctl.push(`| ${f.replace(".json", "").replace("__", "/")} | ${disclosed} | ${e ? `${pct(e.point)}% (${pct(e.lo)}–${pct(e.hi)})` : "–"} | ${disclosed >= 5 ? "estimated" : "**not estimated** (no disclosed AI)"} |`);
 }
 
@@ -112,11 +113,13 @@ const lines = [
   ``,
   `## How well it estimates a share`,
   ``,
-  `Mixtures of 40 commits with a known AI share, built from each repository's own human and agent commits, estimated with a model that never saw that repository and the repository's own pre-2022 commits as the human reference:`,
+  `Mixtures of 40 commits with a known AI share (messages long enough to judge), built from each repository's own human and agent commits, estimated with a model that never saw that repository and the repository's own pre-2022 commits as the human reference:`,
   ``,
-  `| True share | Cases | Median error | 90% of errors within |`,
-  `|---:|---:|---:|---:|`,
-  ...Object.entries(mix).map(([k, e]) => `| ${pct(+k)}% | ${e.length} | ${pct(Math.abs(q(e, 0.5)))} pts | ±${pct(Math.max(Math.abs(q(e, 0.05)), Math.abs(q(e, 0.95))))} pts |`),
+  `| True share | Cases | Median absolute error | Mean error (bias) | 90% of errors within |`,
+  `|---:|---:|---:|---:|---:|`,
+  ...Object.entries(mix)
+    .sort((a, b) => +a[0] - +b[0])
+    .map(([k, e]) => `| ${pct(+k)}% | ${e.length} | ${pct(q(e.map(Math.abs), 0.5))} pts | ${e.reduce((s, x) => s + x, 0) / e.length >= 0 ? "+" : ""}${pct(e.reduce((s, x) => s + x, 0) / e.length)} pts | ±${pct(q(e.map(Math.abs), 0.9))} pts |`),
   ``,
   `The 90% interval contained the true share in **${pct(covered / cases)}%** of ${cases} cases.`,
   ``,

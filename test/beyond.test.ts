@@ -6,7 +6,7 @@ import { validateReport } from "../src/core/validate";
 
 const agentMsg = (i: number) =>
   `fix(parser): handle empty option values without crashing the sender ${i}\n\nThe replication protocol allows options without values, but the parser read the argument directly. This change reads both options through the helper, which reports a missing value cleanly and keeps the old behaviour otherwise.\n\n- read proto_version and publication_names through defGetString()\n- add a regression test for both options`;
-const humanMsg = (i: number) => (i % 2 ? `fix typo ${i}` : `bump deps ${i}`);
+const humanMsg = (i: number) => (i % 2 ? `fix the off by one in the tokenizer when input ends early ${i}` : `bump the lockfile and drop the old node 18 workaround ${i}`);
 function data(opts: { signed: number; undisclosedAgentStyle: number; human: number; baseline?: number; setup?: { path: string; agentId: string }[] }): RepoData {
   const items: RepoData["commits"]["items"] = [];
   let n = 0;
@@ -31,6 +31,7 @@ describe("beyond signatures", () => {
     const r = buildReport(data({ signed: GATE_DISCLOSED - 1, undisclosedAgentStyle: 60, human: 20 }));
     expect(r.beyond?.estimate).toBeNull();
     expect(r.beyond?.likely).toBeNull();
+    expect(r.beyond?.reason).toBe("no-evidence");
     expect(validateReport(r).ok).toBe(true);
   });
 
@@ -84,5 +85,43 @@ describe("prevalence", () => {
     expect(prevalence([0.99, 0.99], 0.2, 0.8)!.point).toBe(1);
     expect(prevalence([0.01], 0.2, 0.8)!.point).toBe(0);
     expect(prevalence([], 0.2, 0.8)).toBeNull();
+  });
+});
+
+describe("beyond signatures, review fixes", () => {
+  it("treats too-short messages as unknown instead of human", () => {
+    const d = data({ signed: 0, undisclosedAgentStyle: 0, human: 0, setup: [{ path: "AGENTS.md", agentId: "codex" }] });
+    for (let i = 0; i < 25; i++) d.commits.items.push({ sha: `t${i}`, message: "fix typo", date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/t${i}`, parents: 1 });
+    const r = buildReport(d);
+    expect(r.beyond!.estimate).toBeNull();
+    expect(r.beyond!.reason).toBe("too-few-judgeable");
+  });
+  it("keeps short commits out of the low end but inside the high end of the range", () => {
+    const d = data({ signed: 20, undisclosedAgentStyle: 40, human: 0, baseline: 60 });
+    for (let i = 0; i < 40; i++) d.commits.items.push({ sha: `t${i}`, message: `v1.${i}`, date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/t${i}`, authorLogin: "dev", parents: 1 });
+    const r = buildReport(d);
+    const l = r.beyond!.likely!;
+    expect(r.beyond!.estimate!.tooShort).toBe(40);
+    expect(l.hi - l.lo).toBeGreaterThan(0.3);
+  });
+  it("merges a person's login and e-mail and leaves agent accounts out of the author metric", () => {
+    const d = data({ signed: 5, undisclosedAgentStyle: 0, human: 0 });
+    d.commits.items = d.commits.items.map((c) => ({ ...c, authorLogin: "alice", authorEmail: "alice@example.org" }));
+    d.commits.items.push({ sha: "x1", message: "fix the parser for empty values in options", date: "2026-10-10T00:00:00Z", url: "https://github.com/o/r/commit/x1", authorLogin: null, authorEmail: "alice@example.org", parents: 1 });
+    d.commits.items.push({ sha: "x2", message: "x\n\nCo-Authored-By: Claude <noreply@anthropic.com>", date: "2026-10-10T00:00:00Z", url: "https://github.com/o/r/commit/x2", authorLogin: "claude[bot]", parents: 1 });
+    const r = buildReport(d);
+    expect(r.beyond!.authors).toEqual({ aiAuthors: 1, authors: 1, commitsByAiAuthors: 6 });
+  });
+  it("survives a huge commit message", () => {
+    const d = data({ signed: 0, undisclosedAgentStyle: 0, human: 1 });
+    d.commits.items.push({ sha: "h", message: "subject\n" + "x\n".repeat(150_000), date: "2026-10-10T00:00:00Z", url: "https://github.com/o/r/commit/h", parents: 1 });
+    expect(() => buildReport(d)).not.toThrow();
+  });
+  it("says why when every commit is disclosed", () => {
+    const r = buildReport(data({ signed: 25, undisclosedAgentStyle: 0, human: 0 }));
+    expect(r.beyond!.reason).toBe("all-disclosed");
+  });
+  it("strips the aider markers", () => {
+    expect(stripSignatures("aider: fix typo (aider)")).toBe("fix typo");
   });
 });

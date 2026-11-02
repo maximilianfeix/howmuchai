@@ -1,5 +1,5 @@
 import { createClassifier, type Classifier } from "./classify";
-import { GitHubClient } from "./github";
+import { AbortedError, GitHubClient } from "./github";
 import { registry } from "./registry";
 import { prevalence } from "./estimate";
 import modelJson from "./style-model.json";
@@ -139,11 +139,20 @@ export async function fetchRepoData(input: string, opts: AnalyzeOptions = {}): P
   ]);
   const data: RepoData = { repo, commits, pulls, since, until: now.toISOString(), days, baseline: null, setup: null };
   if (opts.beyond !== false) {
-    data.setup = await client.agentSetup(repo.fullName);
+    // Supplemental evidence: a failure here (rate limit, network) never costs the signature report.
+    const optional = async <T>(f: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await f();
+      } catch (e) {
+        if (e instanceof AbortedError) throw e;
+        return null;
+      }
+    };
+    data.setup = await optional(() => client.agentSetup(repo.fullName));
     // The baseline costs one request; only fetch it when the gate can pass.
     const cls = createClassifier(registry);
     const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && cls.commit(c).some((m) => m.confidence === "high")).length;
-    if (disclosed >= GATE_DISCLOSED || data.setup.length > 0) data.baseline = await client.baseline(repo.fullName);
+    if (disclosed >= GATE_DISCLOSED || (data.setup?.length ?? 0) > 0) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
 }
@@ -151,39 +160,66 @@ export async function fetchRepoData(input: string, opts: AnalyzeOptions = {}): P
 /** Minimum disclosed commits before the experimental estimate is made (see eval/STYLE.md). */
 export const GATE_DISCLOSED = 5;
 
+/** Accounts of agents themselves; they are not "people who disclose agent use". */
+const AGENT_ACCOUNT = /\[bot\]$|^(copilot|cursoragent|claude|devin-ai-integration|google-labs-jules|openhands(-agent)?|opencode-agent|capy-ai)$/i;
+
+/** Minimum judgeable undisclosed commits for an estimate. */
+export const MIN_JUDGEABLE = 20;
+
 export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
   const items = d.commits.items.filter((c) => !cls.isIgnoredCommit(c));
   const signed = new Set<CommitInput>();
   for (const c of items) if (cls.commit(c).some((m) => m.confidence === "high")) signed.add(c);
-  const who = (c: CommitInput) => (c.authorLogin ?? c.authorEmail ?? c.authorName ?? "").toLowerCase();
-  const aiAuthors = new Set([...signed].map(who).filter(Boolean));
-  const authors = new Set(items.map(who).filter(Boolean));
+
+  // One identity per person: the login when known; an e-mail address maps to the login it was seen with.
+  const loginByEmail = new Map<string, string>();
+  for (const c of items) if (c.authorLogin && c.authorEmail) loginByEmail.set(c.authorEmail.toLowerCase(), c.authorLogin.toLowerCase());
+  const who = (c: CommitInput): string | null => {
+    const login = c.authorLogin?.toLowerCase() ?? (c.authorEmail ? loginByEmail.get(c.authorEmail.toLowerCase()) : undefined);
+    if (login) return AGENT_ACCOUNT.test(login) ? null : `@${login}`;
+    if (c.authorEmail) return `<${c.authorEmail.toLowerCase()}>`;
+    return null;
+  };
+  const people = items.filter((c) => who(c) !== null);
+  const aiAuthors = new Set([...signed].map(who).filter((x): x is string => x !== null));
   const beyond: Beyond = {
     setup: d.setup ?? null,
-    authors: { aiAuthors: aiAuthors.size, authors: authors.size, commitsByAiAuthors: items.filter((c) => aiAuthors.has(who(c))).length },
+    authors: { aiAuthors: aiAuthors.size, authors: new Set(people.map(who)).size, commitsByAiAuthors: people.filter((c) => aiAuthors.has(who(c)!)).length },
     estimate: null,
     likely: null,
+    reason: null,
     model: styleModel.version,
   };
+  if (items.length === 0) return { ...beyond, reason: "no-commits" };
   const gate = signed.size >= GATE_DISCLOSED ? "disclosed" : (d.setup?.length ?? 0) > 0 ? "setup" : null;
+  if (!gate) return { ...beyond, reason: "no-evidence" };
   const undisclosed = items.filter((c) => !signed.has(c));
-  if (!gate || undisclosed.length < 20) return beyond;
-  const S = undisclosed.map((c) => score(styleModel, c.message));
-  const ownHuman = (d.baseline ?? []).filter((c) => !cls.isIgnoredCommit(c));
+  // Only messages long enough to carry style are scored; short ones stay unknown and widen the range.
+  const judged = undisclosed.filter((c) => isJudgeable(c.message));
+  const short = undisclosed.length - judged.length;
+  if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
+  const S = judged.map((c) => score(styleModel, c.message));
+  const ownHuman = (d.baseline ?? []).filter((c) => !cls.isIgnoredCommit(c) && isJudgeable(c.message));
   const H = ownHuman.length >= 30 ? ownHuman.map((c) => score(styleModel, c.message)) : styleModel.humanMean;
-  const A = signed.size >= 10 ? [...signed].map((c) => score(styleModel, c.message)) : styleModel.agentMean;
+  const signedJudged = [...signed].filter((c) => isJudgeable(c.message));
+  const A = signedJudged.length >= 10 ? signedJudged.map((c) => score(styleModel, c.message)) : styleModel.agentMean;
   const p = prevalence(S, H, A);
-  if (!p) return beyond;
+  if (!p) return { ...beyond, reason: "inseparable" };
   beyond.estimate = {
     ...p,
     gate,
     humanReference: typeof H === "number" ? "training" : "own-history",
     aiReference: typeof A === "number" ? "training" : "repo",
-    tooShort: undisclosed.filter((c) => !isJudgeable(c.message)).length,
+    tooShort: short,
   };
+  // Overall: the short commits are unknown. Low end counts none of them, high end the high rate, the
+  // best estimate assumes they follow the judged ones.
   const n = items.length;
-  const share = (x: number) => (signed.size + x * undisclosed.length) / n;
-  beyond.likely = { point: share(p.point), lo: share(p.lo), hi: share(p.hi) };
+  beyond.likely = {
+    point: (signed.size + p.point * undisclosed.length) / n,
+    lo: (signed.size + p.lo * judged.length) / n,
+    hi: (signed.size + p.hi * undisclosed.length) / n,
+  };
   return beyond;
 }
 

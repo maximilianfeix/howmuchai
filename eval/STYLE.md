@@ -14,17 +14,17 @@ This is not good enough to judge a single commit, and howmuchai never does. Care
 
 ## How well it estimates a share
 
-Mixtures of 40 commits with a known AI share, built from each repository's own human and agent commits, estimated with a model that never saw that repository and the repository's own pre-2022 commits as the human reference:
+Mixtures of 40 commits with a known AI share (messages long enough to judge), built from each repository's own human and agent commits, estimated with a model that never saw that repository and the repository's own pre-2022 commits as the human reference:
 
-| True share | Cases | Median error | 90% of errors within |
-|---:|---:|---:|---:|
-| 0.0% | 51 | 0.1 pts | ±19.6 pts |
-| 100.0% | 38 | 0.0 pts | ±14.9 pts |
-| 25.0% | 51 | 0.4 pts | ±21.3 pts |
-| 50.0% | 51 | 2.4 pts | ±20.1 pts |
-| 75.0% | 51 | 1.3 pts | ±21.6 pts |
+| True share | Cases | Median absolute error | Mean error (bias) | 90% of errors within |
+|---:|---:|---:|---:|---:|
+| 0.0% | 25 | 0.4 pts | +2.9 pts | ±6.9 pts |
+| 25.0% | 25 | 6.1 pts | +1.6 pts | ±13.8 pts |
+| 50.0% | 25 | 10.5 pts | +3.8 pts | ±15.7 pts |
+| 75.0% | 25 | 7.0 pts | +3.9 pts | ±20.5 pts |
+| 100.0% | 21 | 0.0 pts | -2.0 pts | ±5.5 pts |
 
-The 90% interval contained the true share in **95.0%** of 242 cases.
+The 90% interval contained the true share in **95.9%** of 121 cases.
 
 ## Why there is a gate
 
@@ -32,12 +32,12 @@ The 90% interval contained the true share in **95.0%** of 242 cases.
 
 | Project | Disclosed AI commits | Ungated estimate | Shown |
 |---|---:|---:|---|
-| FFmpeg/FFmpeg | 77 | 50.7% (37.4–63.7) | estimated |
-| NetBSD/src | 0 | 6.9% (0.0–15.9) | **not estimated** (no disclosed AI) |
-| curl/curl | 1 | 57.8% (49.8–65.7) | **not estimated** (no disclosed AI) |
+| FFmpeg/FFmpeg | 77 | 49.4% (34.8–61.3) | estimated |
+| NetBSD/src | 0 | 11.3% (0.1–21.9) | **not estimated** (no disclosed AI) |
+| curl/curl | 1 | 60.1% (52.8–68.3) | **not estimated** (no disclosed AI) |
 | gentoo/gentoo | 0 | 0.0% (0.0–1.4) | **not estimated** (no disclosed AI) |
 | git/git | 5 | 19.4% (0.9–34.5) | estimated |
-| openbsd/src | 0 | 12.5% (1.4–21.3) | **not estimated** (no disclosed AI) |
-| postgres/postgres | 0 | 99.1% (89.3–100.0) | **not estimated** (no disclosed AI) |
+| openbsd/src | 0 | 11.7% (0.0–22.1) | **not estimated** (no disclosed AI) |
+| postgres/postgres | 0 | 99.0% (88.1–100.0) | **not estimated** (no disclosed AI) |
 | qemu/qemu | 0 | 47.5% (36.2–57.9) | **not estimated** (no disclosed AI) |
-| systemd/systemd | 0 | 50.4% (43.0–56.7) | **not estimated** (no disclosed AI) |
+| systemd/systemd | 0 | 46.2% (38.4–54.1) | **not estimated** (no disclosed AI) |

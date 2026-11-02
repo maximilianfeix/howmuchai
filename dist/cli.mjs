@@ -1037,7 +1037,7 @@ var style_model_default = {
 var SIG = /^\s*(co-authored-by|assisted-by|claude-session|copilot-session|amp-thread(-id)?)\s*:/i;
 var SIG_TEXT = /generated (with|by)|claude\.ai\/code|🤖|cursor\.com|devin\.ai|capy\.ai|chatgpt\.com\/codex/i;
 function stripSignatures(m) {
-  return m.split("\n").filter((l) => !SIG.test(l) && !SIG_TEXT.test(l)).join("\n").trim();
+  return m.slice(0, 65536).split("\n").filter((l) => !SIG.test(l) && !SIG_TEXT.test(l)).join("\n").replace(/^aider: /i, "").replace(/ \(aider\)$/im, "").trim();
 }
 var strip = stripSignatures;
 var TRAILER = /^[A-Za-z][A-Za-z-]{1,40}:\s+\S/;
@@ -1068,7 +1068,7 @@ function features(raw) {
     prose.length ? +prose.every((l) => l.length <= 72) : 0,
     l1(trailers.filter((l) => HUMAN_TRAILER.test(l.trim())).length),
     +/^[a-z]/.test(subj),
-    l1(Math.max(0, ...prose.map((l) => l.length))),
+    l1(prose.reduce((mx, l) => l.length > mx ? l.length : mx, 0)),
     +/^\s*\d+\.\s/m.test(body),
     +/\b(this (change|commit|pr|patch)|so that|instead of|which means)\b/i.test(body),
     +/[a-z]\.  [A-Z]/.test(m),
@@ -1183,47 +1183,73 @@ async function fetchRepoData(input, opts = {}) {
   ]);
   const data = { repo, commits, pulls, since, until: now.toISOString(), days, baseline: null, setup: null };
   if (opts.beyond !== false) {
-    data.setup = await client.agentSetup(repo.fullName);
+    const optional = async (f) => {
+      try {
+        return await f();
+      } catch (e) {
+        if (e instanceof AbortedError) throw e;
+        return null;
+      }
+    };
+    data.setup = await optional(() => client.agentSetup(repo.fullName));
     const cls = createClassifier(registry);
     const disclosed = commits.items.filter((c2) => !cls.isIgnoredCommit(c2) && cls.commit(c2).some((m) => m.confidence === "high")).length;
-    if (disclosed >= GATE_DISCLOSED || data.setup.length > 0) data.baseline = await client.baseline(repo.fullName);
+    if (disclosed >= GATE_DISCLOSED || (data.setup?.length ?? 0) > 0) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
 }
 var GATE_DISCLOSED = 5;
+var AGENT_ACCOUNT = /\[bot\]$|^(copilot|cursoragent|claude|devin-ai-integration|google-labs-jules|openhands(-agent)?|opencode-agent|capy-ai)$/i;
+var MIN_JUDGEABLE = 20;
 function beyondSignatures(d, cls) {
   const items = d.commits.items.filter((c2) => !cls.isIgnoredCommit(c2));
   const signed = /* @__PURE__ */ new Set();
   for (const c2 of items) if (cls.commit(c2).some((m) => m.confidence === "high")) signed.add(c2);
-  const who = (c2) => (c2.authorLogin ?? c2.authorEmail ?? c2.authorName ?? "").toLowerCase();
-  const aiAuthors = new Set([...signed].map(who).filter(Boolean));
-  const authors = new Set(items.map(who).filter(Boolean));
+  const loginByEmail = /* @__PURE__ */ new Map();
+  for (const c2 of items) if (c2.authorLogin && c2.authorEmail) loginByEmail.set(c2.authorEmail.toLowerCase(), c2.authorLogin.toLowerCase());
+  const who = (c2) => {
+    const login = c2.authorLogin?.toLowerCase() ?? (c2.authorEmail ? loginByEmail.get(c2.authorEmail.toLowerCase()) : void 0);
+    if (login) return AGENT_ACCOUNT.test(login) ? null : `@${login}`;
+    if (c2.authorEmail) return `<${c2.authorEmail.toLowerCase()}>`;
+    return null;
+  };
+  const people = items.filter((c2) => who(c2) !== null);
+  const aiAuthors = new Set([...signed].map(who).filter((x) => x !== null));
   const beyond = {
     setup: d.setup ?? null,
-    authors: { aiAuthors: aiAuthors.size, authors: authors.size, commitsByAiAuthors: items.filter((c2) => aiAuthors.has(who(c2))).length },
+    authors: { aiAuthors: aiAuthors.size, authors: new Set(people.map(who)).size, commitsByAiAuthors: people.filter((c2) => aiAuthors.has(who(c2))).length },
     estimate: null,
     likely: null,
+    reason: null,
     model: styleModel.version
   };
+  if (items.length === 0) return { ...beyond, reason: "no-commits" };
   const gate = signed.size >= GATE_DISCLOSED ? "disclosed" : (d.setup?.length ?? 0) > 0 ? "setup" : null;
+  if (!gate) return { ...beyond, reason: "no-evidence" };
   const undisclosed = items.filter((c2) => !signed.has(c2));
-  if (!gate || undisclosed.length < 20) return beyond;
-  const S = undisclosed.map((c2) => score(styleModel, c2.message));
-  const ownHuman = (d.baseline ?? []).filter((c2) => !cls.isIgnoredCommit(c2));
+  const judged = undisclosed.filter((c2) => isJudgeable(c2.message));
+  const short = undisclosed.length - judged.length;
+  if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
+  const S = judged.map((c2) => score(styleModel, c2.message));
+  const ownHuman = (d.baseline ?? []).filter((c2) => !cls.isIgnoredCommit(c2) && isJudgeable(c2.message));
   const H = ownHuman.length >= 30 ? ownHuman.map((c2) => score(styleModel, c2.message)) : styleModel.humanMean;
-  const A = signed.size >= 10 ? [...signed].map((c2) => score(styleModel, c2.message)) : styleModel.agentMean;
+  const signedJudged = [...signed].filter((c2) => isJudgeable(c2.message));
+  const A = signedJudged.length >= 10 ? signedJudged.map((c2) => score(styleModel, c2.message)) : styleModel.agentMean;
   const p = prevalence(S, H, A);
-  if (!p) return beyond;
+  if (!p) return { ...beyond, reason: "inseparable" };
   beyond.estimate = {
     ...p,
     gate,
     humanReference: typeof H === "number" ? "training" : "own-history",
     aiReference: typeof A === "number" ? "training" : "repo",
-    tooShort: undisclosed.filter((c2) => !isJudgeable(c2.message)).length
+    tooShort: short
   };
   const n = items.length;
-  const share = (x) => (signed.size + x * undisclosed.length) / n;
-  beyond.likely = { point: share(p.point), lo: share(p.lo), hi: share(p.hi) };
+  beyond.likely = {
+    point: (signed.size + p.point * undisclosed.length) / n,
+    lo: (signed.size + p.lo * judged.length) / n,
+    hi: (signed.size + p.hi * undisclosed.length) / n
+  };
   return beyond;
 }
 function buildReport(d, opts = {}) {
@@ -1325,6 +1351,13 @@ function section(title, sec, unit, r) {
   lines.push(c.dim(`  ${coverageLabel(sec, r, unit)}`));
   return lines;
 }
+var NO_ESTIMATE = {
+  "no-evidence": "this repo discloses fewer than 5 agent commits and has no agent setup files, and without evidence of agent use a number would be a guess",
+  "all-disclosed": "every commit already carries a signature",
+  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
+  inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "no-commits": "there are no commits in this period"
+};
 function render(r, evidence) {
   const lines = [
     "",
@@ -1341,9 +1374,9 @@ function render(r, evidence) {
     lines.push(`${c.bold("Beyond signatures")} ${c.dim("(experimental)")}`);
     if (b.estimate && b.likely) {
       lines.push(`  likely ${c.bold(`${pc(b.likely.lo)}\u2013${pc(b.likely.hi)}`)} AI-involved, best estimate ${pc(b.likely.point)}`);
-      lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
+      lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai - b.estimate.tooShort} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
     } else {
-      lines.push(c.dim("  no estimate: fewer than 5 disclosed agent commits and no agent setup files"));
+      lines.push(c.dim(`  no estimate: ${NO_ESTIMATE[b.reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"]}`));
     }
     if (b.authors.aiAuthors) lines.push(`  ${pc(b.authors.commitsByAiAuthors / r.commits.total)} of commits by ${b.authors.aiAuthors}/${b.authors.authors} authors who disclose agent use here`);
     if (b.setup) lines.push(`  agent setup files: ${b.setup.length ? b.setup.map((s) => s.path).join(", ") : "none"}`);
