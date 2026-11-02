@@ -17,7 +17,7 @@ inputs:
     required: false
     default: .github/howmuchai
   commit:
-    description: Commit and push the files ("true" or "false"). Needs `contents: write`.
+    description: "Commit and push the files (\"true\" or \"false\"). Needs `contents: write`."
     required: false
     default: "true"
   token:

@@ -30,7 +30,10 @@ jobs:
           ANSWER_FILE: ${{ runner.temp }}/answer.json
         run: npx tsx scripts/track.ts --data .data
       - name: Save data
-        run: scripts/push-data.sh .data "track: issue #${{ github.event.issue.number }}"
+        env:
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          scripts/push-data.sh .data "track: issue #$ISSUE"
       - name: Answer and close (only after the data is saved)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
