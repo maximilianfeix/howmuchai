@@ -1,6 +1,6 @@
 import "./style.css";
 import { analyzeRepo, DEFAULTS, parseRepo } from "../../src/core/analyze";
-import { badgePath, cardPath, pagePath, reportPath, type Board, type BoardEntry } from "../../src/core/dataset";
+import { badgePath, cardPath, pagePath, reportPath, topCohort, type Board, type BoardEntry } from "../../src/core/dataset";
 import { escapeXml as esc, formatShare } from "../../src/core/format";
 import { GitHubClient, GitHubError } from "../../src/core/github";
 import { agentColor, agentName, registry } from "../../src/core/registry";
@@ -212,8 +212,9 @@ function renderHome() {
       return;
     }
     el.className = "";
-    const top = [...b.repos].filter((e) => e.total >= 30 && e.share !== null).sort((a, b2) => (b2.share ?? 0) - (a.share ?? 0)).slice(0, 8);
-    el.innerHTML = boardTable(top, 1) + `<p><a href="${url("leaderboard/")}" data-path="leaderboard/">See all ${b.repos.length.toLocaleString("en-US")} repos →</a></p>`;
+    const cohort = topCohort(b);
+    const top = cohort.filter((e) => e.total >= 30 && e.share !== null).sort((a, b2) => (b2.share ?? 0) - (a.share ?? 0)).slice(0, 8);
+    el.innerHTML = boardTable(top, 1) + `<p><a href="${url("leaderboard/")}" data-path="leaderboard/">See all ${cohort.length.toLocaleString("en-US")} repos →</a></p>`;
   });
 }
 
@@ -400,11 +401,14 @@ async function renderLeaderboard() {
   setTitle("Leaderboard");
   main.innerHTML = `<div class="loading" role="status">Loading leaderboard</div>`;
   const b = await loadBoard();
-  if (!b || b.repos.length === 0) {
-    main.innerHTML = `<h1>Leaderboard</h1><p class="muted">The first crawl is still running. Check back soon.</p>`;
+  if (!b || topCohort(b).length === 0) {
+    main.innerHTML = `<h1>Leaderboard</h1><p class="muted">${b ? "The first crawl is still running. Check back soon." : "The leaderboard could not be loaded. Please try again later."}</p>`;
     return;
   }
-  const measured = b.repos.filter((e) => e.total > 0);
+  const cohort = topCohort(b);
+  const tracked = b.repos.filter((e) => e.cohort === "tracked");
+  const info = b.cohort;
+  const measured = cohort.filter((e) => e.total > 0);
   const withAi = measured.filter((e) => e.ai > 0);
   const totalCommits = measured.reduce((s, e) => s + e.total, 0);
   const aiCommits = measured.reduce((s, e) => s + e.ai, 0);
@@ -415,7 +419,11 @@ async function renderLeaderboard() {
 
   main.innerHTML = html`
     <div class="prose"><h1>The AI share of popular open source</h1>
-    <p class="muted">The ${b.repos.length.toLocaleString("en-US")} most-starred GitHub repositories with a push in the last 30 days, measured over the last ${b.days} days (up to ${DEFAULTS.maxCommits} commits each). Updated continuously; this snapshot ${ago(b.generatedAt)}.</p></div>
+    <p class="muted">The most-starred GitHub repositories with a push in the last 30 days${info ? ` (list taken ${esc(info.selectedAt.slice(0, 10))})` : ""}, each measured over the last ${b.days} days, up to ${DEFAULTS.maxCommits} commits. ${
+      info
+        ? `${info.measured.toLocaleString("en-US")} of ${info.selected.toLocaleString("en-US")} measured${info.missing ? `, ${info.missing} not yet or not measurable` : ""}; ${info.capped} hit the commit cap and cover a shorter time; ${info.stale ? `${info.stale} measurements are older than 48 hours` : "all measurements are less than 48 hours old"}.`
+        : ""
+    } Repos tracked on request are listed separately and are not part of these numbers.</p></div>
     <div class="lb-stats">
       <div class="card"><div class="stat">${formatShare(withAi.length, measured.length)}</div><p>of active repos have at least one AI-signed commit (${withAi.length} of ${measured.length})</p></div>
       <div class="card"><div class="stat">${formatShare(aiCommits, totalCommits)}</div><p>of all ${totalCommits.toLocaleString("en-US")} commits read carry an agent signature</p></div>
@@ -436,16 +444,18 @@ async function renderLeaderboard() {
         <option value="">All agents</option>
         ${registry.agents.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
       </select>
+      ${tracked.length ? `<label class="muted" style="font-size:14px"><input type="checkbox" id="lb-tracked"> Show the ${tracked.length} repos tracked on request instead</label>` : ""}
       <a class="muted" style="margin-left:auto;font-size:14px" href="${url("data/leaderboard.json")}">Download JSON</a>
     </div>
     <div id="lb-table"></div>
     <p class="muted" style="font-size:14px">Repos with fewer than 10 commits in the window are listed last. Ask to <a href="https://github.com/maximilianfeix/howmuchai/issues/new?template=track-repo.yml">track another repo</a>.</p>
   `;
   let sort = "share";
+  let showTracked = false;
   const draw = () => {
     const q = (document.getElementById("lb-q") as HTMLInputElement).value.trim().toLowerCase();
     const agent = (document.getElementById("lb-agent") as HTMLSelectElement).value;
-    let rows = b.repos.filter((e) => (!q || e.fullName.toLowerCase().includes(q)) && (!agent || (e.byAgent[agent] ?? 0) > 0));
+    let rows = (showTracked ? tracked : cohort).filter((e) => (!q || e.fullName.toLowerCase().includes(q)) && (!agent || (e.byAgent[agent] ?? 0) > 0));
     const key = (e: BoardEntry) => (sort === "stars" ? e.stars : sort === "ai" ? e.ai : e.total < 10 ? -1 : (e.share ?? -1));
     rows = rows.sort((a, z) => key(z) - key(a) || z.stars - a.stars);
     const el = document.getElementById("lb-table")!;
@@ -460,6 +470,10 @@ async function renderLeaderboard() {
   );
   document.getElementById("lb-q")!.addEventListener("input", draw);
   document.getElementById("lb-agent")!.addEventListener("change", draw);
+  document.getElementById("lb-tracked")?.addEventListener("change", (e) => {
+    showTracked = (e.target as HTMLInputElement).checked;
+    draw();
+  });
   draw();
 }
 

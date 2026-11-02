@@ -16,13 +16,72 @@ export interface BoardEntry {
   capped: boolean;
   oldest: string | null;
   measuredAt: string;
+  /** "top": one of the most-starred active repos. "tracked": measured because someone asked. */
+  cohort: "top" | "tracked";
+}
+
+/** How complete the top cohort is. */
+export interface CohortInfo {
+  /** When the list of most-starred repos was taken. */
+  selectedAt: string;
+  selected: number;
+  measured: number;
+  /** Selected but not measured yet (or not measurable). */
+  missing: number;
+  capped: number;
+  /** Measured more than 48 hours ago. */
+  stale: number;
+  /** Oldest measurement in the cohort. */
+  oldestMeasurement: string | null;
 }
 
 export interface Board {
   schema: 1;
   generatedAt: string;
   days: number;
+  /** Missing in boards written before cohorts existed. */
+  cohort?: CohortInfo;
   repos: BoardEntry[];
+}
+
+/** Entries of the top cohort. Old boards without the field count as top. */
+export function topCohort(b: Board): BoardEntry[] {
+  return b.repos.filter((e) => (e.cohort ?? "top") === "top");
+}
+
+/** Builds the board: every stored report that is selected or tracked, with cohort statistics for the top list. */
+export function buildBoard(entries: Omit<BoardEntry, "cohort">[], top: string[], tracked: string[], selectedAt: string, days: number, now: Date): Board {
+  const topSet = new Set(top.map((r) => r.toLowerCase()));
+  const trackedSet = new Set(tracked.map((r) => r.toLowerCase()));
+  const repos: BoardEntry[] = [];
+  const seen = new Set<string>();
+  for (const e of entries) {
+    const k = e.fullName.toLowerCase();
+    if (seen.has(k)) continue;
+    if (topSet.has(k)) repos.push({ ...e, cohort: "top" });
+    else if (trackedSet.has(k)) repos.push({ ...e, cohort: "tracked" });
+    else continue;
+    seen.add(k);
+  }
+  repos.sort((a, b) => b.stars - a.stars);
+  const topEntries = repos.filter((e) => e.cohort === "top");
+  const staleBefore = now.getTime() - 48 * 3_600_000;
+  const oldest = topEntries.reduce<string | null>((m, e) => (!m || e.measuredAt < m ? e.measuredAt : m), null);
+  return {
+    schema: 1,
+    generatedAt: now.toISOString(),
+    days,
+    cohort: {
+      selectedAt,
+      selected: topSet.size,
+      measured: topEntries.length,
+      missing: topSet.size - topEntries.length,
+      capped: topEntries.filter((e) => e.capped).length,
+      stale: topEntries.filter((e) => Date.parse(e.measuredAt) < staleBefore).length,
+      oldestMeasurement: oldest,
+    },
+    repos,
+  };
 }
 
 export function toEntry(r: Report): BoardEntry {
@@ -41,6 +100,7 @@ export function toEntry(r: Report): BoardEntry {
     capped: r.commits.capped,
     oldest: r.commits.oldest,
     measuredAt: r.generatedAt,
+    cohort: "top",
   };
 }
 

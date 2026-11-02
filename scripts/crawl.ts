@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { buildReport, DEFAULTS, fetchRepoData, type RepoData } from "../src/core/analyze";
-import { badgePath, cardPath, reportPath, toEntry, type Board, type BoardEntry } from "../src/core/dataset";
+import { badgePath, buildBoard, cardPath, reportPath, toEntry, type Board, type BoardEntry } from "../src/core/dataset";
 import { GitHubClient, GitHubError } from "../src/core/github";
 import { renderBadge, renderCard, shieldsJson } from "../src/core/render";
 import { REPORT_SCHEMA, type Report } from "../src/core/types";
@@ -164,22 +164,20 @@ async function main() {
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   writeFile("skip.json", JSON.stringify(skip, null, 1) + "\n");
 
-  // leaderboard from every stored report that is still in the list
-  const wanted = new Set(all.map((r) => r.toLowerCase()));
+  // leaderboard from every stored report that is selected or tracked; statistics use the top cohort only
   const entries: BoardEntry[] = [];
   const reposDir = join(DATA, "data/repos");
   if (existsSync(reposDir)) {
     for (const owner of readdirSync(reposDir)) {
       for (const f of readdirSync(join(reposDir, owner))) {
         const rep = JSON.parse(readFileSync(join(reposDir, owner, f), "utf8")) as Report;
-        if (wanted.has(rep.repo.fullName.toLowerCase())) entries.push(toEntry(rep));
+        if (rep.schema === REPORT_SCHEMA) entries.push(toEntry(rep));
       }
     }
   }
-  entries.sort((a, b) => b.stars - a.stars);
-  const board: Board = { schema: 1, generatedAt: new Date().toISOString(), days: DEFAULTS.days, repos: entries };
+  const board: Board = buildBoard(entries, top.top, tracked.repos, top.generatedAt, DEFAULTS.days, new Date());
   writeFile("data/leaderboard.json", JSON.stringify(board) + "\n");
-  console.log(`measured ${done}, leaderboard has ${entries.length} repos, ${client.requests} requests, ${client.lastRate?.remaining ?? "?"} left`);
+  console.log(`measured ${done}, leaderboard has ${board.repos.length} repos (top cohort ${board.cohort?.measured}/${board.cohort?.selected}), ${client.requests} requests, ${client.lastRate?.remaining ?? "?"} left`);
 }
 
 main().catch((e) => {
