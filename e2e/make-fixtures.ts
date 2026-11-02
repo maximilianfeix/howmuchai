@@ -13,7 +13,7 @@ function repo(fullName: string, ai: number, total: number, extra: Partial<RepoDa
   const now = new Date();
   const items = Array.from({ length: total }, (_, i) => ({
     sha: `${fullName.length}${i}`.padEnd(7, "0"),
-    message: i < ai ? `change ${i}\n\nCo-Authored-By: Claude <noreply@anthropic.com>` : `change ${i}`,
+    message: (fullName === "demo/xss" ? `<img src=x onerror="window.__xss=2"> ${i}` : `change ${i}`) + (i < ai ? "\n\nCo-Authored-By: Claude <noreply@anthropic.com>" : ""),
     date: new Date(now.getTime() - (i + 1) * 3_600_000).toISOString(),
     url: `https://github.com/${fullName}/commit/${i}`,
     authorName: "Dev",

@@ -34,6 +34,7 @@
     "e2e": "vite build && tsx e2e/make-fixtures.ts && playwright test"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^26.6.6",
