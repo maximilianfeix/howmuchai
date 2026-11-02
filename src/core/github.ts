@@ -102,26 +102,37 @@ export class GitHubClient {
     };
   }
 
-  /** Commits on the default branch since `since`, newest first, at most `max`. */
-  async commits(fullName: string, since: string, max: number): Promise<{ items: CommitInput[]; capped: boolean }> {
+  /**
+   * Commits on the default branch between `since` and `until`, newest first, at most `max`.
+   * `capped` is true exactly when more commits exist in the window than were returned.
+   */
+  async commits(fullName: string, since: string, max: number, until?: string): Promise<{ items: CommitInput[]; capped: boolean }> {
     const items: CommitInput[] = [];
     const perPage = 100;
-    for (let page = 1; items.length < max; page++) {
-      const batch = await this.get<RawCommit[]>(
-        `/repos/${fullName}/commits?since=${encodeURIComponent(since)}&per_page=${perPage}&page=${page}`,
-      );
+    const range = `since=${encodeURIComponent(since)}${until ? `&until=${encodeURIComponent(until)}` : ""}`;
+    for (let page = 1; ; page++) {
+      const batch = await this.get<RawCommit[]>(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
       for (const c of batch) items.push(toCommit(c));
-      if (batch.length < perPage) return { items: items.slice(0, max), capped: false };
+      if (items.length > max) return { items: items.slice(0, max), capped: true };
+      if (batch.length < perPage) return { items, capped: false };
+      if (items.length === max) {
+        // Exactly at the cap on a page boundary: look one item further to know whether anything is left.
+        const next = await this.get<RawCommit[]>(`/repos/${fullName}/commits?${range}&per_page=1&page=${max + 1}`);
+        return { items, capped: next.length > 0 };
+      }
     }
-    return { items: items.slice(0, max), capped: true };
   }
 
-  /** Pull requests opened since `since`, newest first, at most `max`. */
-  async pulls(fullName: string, since: string, max: number): Promise<{ items: PullInput[]; capped: boolean }> {
+  /**
+   * Pull requests opened between `since` and `until`, newest first, at most `max`.
+   * `capped` is true exactly when more pull requests were opened in the window than were returned.
+   */
+  async pulls(fullName: string, since: string, max: number, until?: string): Promise<{ items: PullInput[]; capped: boolean }> {
     const items: PullInput[] = [];
     const perPage = 100;
     const sinceMs = Date.parse(since);
-    for (let page = 1; items.length < max; page++) {
+    const untilMs = until ? Date.parse(until) : Infinity;
+    for (let page = 1; ; page++) {
       let batch: RawPull[];
       try {
         batch = await this.get<RawPull[]>(
@@ -133,12 +144,14 @@ export class GitHubClient {
         throw e;
       }
       for (const p of batch) {
-        if (Date.parse(p.created_at) < sinceMs) return { items: items.slice(0, max), capped: false };
+        const t = Date.parse(p.created_at);
+        if (t > untilMs) continue; // opened after the measurement started
+        if (t < sinceMs) return { items: items.slice(0, max), capped: items.length > max };
         items.push(toPull(p));
+        if (items.length > max) return { items: items.slice(0, max), capped: true };
       }
-      if (batch.length < perPage) return { items: items.slice(0, max), capped: false };
+      if (batch.length < perPage) return { items, capped: false };
     }
-    return { items: items.slice(0, max), capped: true };
   }
 }
 

@@ -96,6 +96,8 @@ export interface MonthBucket {
 }
 
 export interface Section {
+  /** Items read from GitHub, before leaving out merges and dependency bots. */
+  fetched: number;
   /** Items considered (after leaving out merges and ignored bots). */
   total: number;
   /** Items with at least one high-confidence AI signature. These make the headline numbers. */
@@ -106,7 +108,7 @@ export interface Section {
   hintsByAgent: Record<string, number>;
   byMonth: MonthBucket[];
   evidence: Evidence[];
-  /** True if the item cap was reached before the start of the window. */
+  /** True if the window holds more items than were read (the cap was reached). */
   capped: boolean;
   /** Date of the oldest item looked at. */
   oldest: string | null;

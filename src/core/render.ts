@@ -26,11 +26,21 @@ function topAgents(sec: Section, n: number): [string, number][] {
     .slice(0, n);
 }
 
-/** Describes the period actually covered, e.g. "last 90 days · 500 commits" or "since 2026-10-12 · 500 commits". */
+/**
+ * Describes what a section covers, the same way everywhere:
+ * "500 commits, last 90 days" when the whole window was read, "newest 500 commits, since 2026-10-28" when the cap was hit,
+ * "no commits in the last 90 days" when there were none.
+ */
+export function coverageLabel(sec: Section, r: Report, unit: string): string {
+  const n = sec.total.toLocaleString("en-US");
+  if (sec.total === 0 && !sec.capped) return `no ${unit} in the last ${r.window.days} days`;
+  if (sec.capped && sec.oldest) return `newest ${n} ${unit}, since ${sec.oldest.slice(0, 10)}`;
+  return `${n} ${unit}, last ${r.window.days} days`;
+}
+
+/** Coverage of the commit section, used on cards, OG images, the web app, CLI and Action. */
 export function periodLabel(r: Report): string {
-  const n = r.commits.total.toLocaleString("en-US");
-  if (r.commits.capped && r.commits.oldest) return `since ${r.commits.oldest.slice(0, 10)} · ${n} commits`;
-  return `last ${r.window.days} days · ${n} commits`;
+  return coverageLabel(r.commits, r, "commits");
 }
 
 /** README card, 495×195, the size of github-readme-stats cards. */

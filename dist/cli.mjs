@@ -153,25 +153,35 @@ var GitHubClient = class {
       fork: r.fork
     };
   }
-  /** Commits on the default branch since `since`, newest first, at most `max`. */
-  async commits(fullName, since, max) {
+  /**
+   * Commits on the default branch between `since` and `until`, newest first, at most `max`.
+   * `capped` is true exactly when more commits exist in the window than were returned.
+   */
+  async commits(fullName, since, max, until) {
     const items = [];
     const perPage = 100;
-    for (let page = 1; items.length < max; page++) {
-      const batch = await this.get(
-        `/repos/${fullName}/commits?since=${encodeURIComponent(since)}&per_page=${perPage}&page=${page}`
-      );
+    const range = `since=${encodeURIComponent(since)}${until ? `&until=${encodeURIComponent(until)}` : ""}`;
+    for (let page = 1; ; page++) {
+      const batch = await this.get(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
       for (const c2 of batch) items.push(toCommit(c2));
-      if (batch.length < perPage) return { items: items.slice(0, max), capped: false };
+      if (items.length > max) return { items: items.slice(0, max), capped: true };
+      if (batch.length < perPage) return { items, capped: false };
+      if (items.length === max) {
+        const next = await this.get(`/repos/${fullName}/commits?${range}&per_page=1&page=${max + 1}`);
+        return { items, capped: next.length > 0 };
+      }
     }
-    return { items: items.slice(0, max), capped: true };
   }
-  /** Pull requests opened since `since`, newest first, at most `max`. */
-  async pulls(fullName, since, max) {
+  /**
+   * Pull requests opened between `since` and `until`, newest first, at most `max`.
+   * `capped` is true exactly when more pull requests were opened in the window than were returned.
+   */
+  async pulls(fullName, since, max, until) {
     const items = [];
     const perPage = 100;
     const sinceMs = Date.parse(since);
-    for (let page = 1; items.length < max; page++) {
+    const untilMs = until ? Date.parse(until) : Infinity;
+    for (let page = 1; ; page++) {
       let batch;
       try {
         batch = await this.get(
@@ -182,12 +192,14 @@ var GitHubClient = class {
         throw e;
       }
       for (const p of batch) {
-        if (Date.parse(p.created_at) < sinceMs) return { items: items.slice(0, max), capped: false };
+        const t = Date.parse(p.created_at);
+        if (t > untilMs) continue;
+        if (t < sinceMs) return { items: items.slice(0, max), capped: items.length > max };
         items.push(toPull(p));
+        if (items.length > max) return { items: items.slice(0, max), capped: true };
       }
-      if (batch.length < perPage) return { items: items.slice(0, max), capped: false };
+      if (batch.length < perPage) return { items, capped: false };
     }
-    return { items: items.slice(0, max), capped: true };
   }
 };
 function toCommit(c2) {
@@ -722,7 +734,7 @@ function parseRepo(input) {
   return `${m[1]}/${m[2]}`;
 }
 function emptySection() {
-  return { total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
+  return { fetched: 0, total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
 }
 function bucket(months, date) {
   const month = date.slice(0, 7);
@@ -753,6 +765,7 @@ function count(sec, b, matches) {
 function summarizeCommits(items, cls, evidenceLimit) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
+  sec.fetched = items.length;
   for (const c2 of items) {
     if (cls.isIgnoredCommit(c2)) continue;
     sec.total++;
@@ -769,6 +782,7 @@ function summarizeCommits(items, cls, evidenceLimit) {
 function summarizePulls(items, cls, evidenceLimit) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
+  sec.fetched = items.length;
   for (const p of items) {
     if (cls.isIgnoredPull(p)) continue;
     sec.total++;
@@ -794,8 +808,8 @@ async function fetchRepoData(input, opts = {}) {
   const since = new Date(now.getTime() - days * 864e5).toISOString();
   const repo = await client.repo(fullName);
   const [commits, pulls] = await Promise.all([
-    client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits),
-    client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls)
+    client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits, now.toISOString()),
+    client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls, now.toISOString())
   ]);
   return { repo, commits, pulls, since, until: now.toISOString(), days };
 }
@@ -826,6 +840,14 @@ function buildReport(d, opts = {}) {
 }
 async function analyzeRepo(input, opts = {}) {
   return buildReport(await fetchRepoData(input, opts), opts);
+}
+
+// src/core/render.ts
+function coverageLabel(sec, r, unit) {
+  const n = sec.total.toLocaleString("en-US");
+  if (sec.total === 0 && !sec.capped) return `no ${unit} in the last ${r.window.days} days`;
+  if (sec.capped && sec.oldest) return `newest ${n} ${unit}, since ${sec.oldest.slice(0, 10)}`;
+  return `${n} ${unit}, last ${r.window.days} days`;
 }
 
 // src/cli/index.ts
@@ -875,8 +897,8 @@ function bar(sec, width = 40) {
   }
   return out + c.dim("\u2591".repeat(width - used));
 }
-function section(title, sec, unit) {
-  const lines = [`${c.bold(title)}  ${c.bold(pct(sec.ai, sec.total))} ${c.dim(`(${sec.ai} of ${sec.total} ${unit})`)}`];
+function section(title, sec, unit, r) {
+  const lines = [`${c.bold(title)}  ${c.bold(pct(sec.ai, sec.total))} ${c.dim(`(${sec.ai} of ${sec.total})`)}`];
   lines.push(`  ${bar(sec)}`);
   const entries = Object.entries(sec.byAgent).sort((a, b) => b[1] - a[1]);
   for (const [id, n] of entries) {
@@ -886,18 +908,17 @@ function section(title, sec, unit) {
     const by = Object.entries(sec.hintsByAgent).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${agentName(id)} ${n}`).join(", ");
     lines.push(c.dim(`  + ${sec.hints} with only a hint, not counted (${by})`));
   }
-  if (sec.capped) lines.push(c.dim(`  read the newest ${sec.total} only (cap reached)`));
+  lines.push(c.dim(`  ${coverageLabel(sec, r, unit)}`));
   return lines;
 }
 function render(r, evidence) {
-  const from = r.commits.capped && r.commits.oldest ? r.commits.oldest.slice(0, 10) : r.window.since.slice(0, 10);
   const lines = [
     "",
-    `${c.bold(clean(r.repo.fullName))}  ${c.dim(`\u2605 ${r.repo.stars.toLocaleString("en-US")} \xB7 ${from} \u2192 ${r.window.until.slice(0, 10)}`)}`,
+    `${c.bold(clean(r.repo.fullName))}  ${c.dim(`\u2605 ${r.repo.stars.toLocaleString("en-US")} \xB7 measured ${r.window.until.slice(0, 10)}`)}`,
     "",
-    ...section("AI-signed commits", r.commits, "commits"),
+    ...section("AI-signed commits", r.commits, "commits", r),
     "",
-    ...section("AI-signed pull requests", r.pulls, "PRs opened"),
+    ...section("AI-signed pull requests", r.pulls, "pull requests", r),
     ""
   ];
   if (evidence) {

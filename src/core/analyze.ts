@@ -27,7 +27,7 @@ export function parseRepo(input: string): string | null {
 }
 
 function emptySection(): Section {
-  return { total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
+  return { fetched: 0, total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
 }
 
 function bucket(months: Map<string, MonthBucket>, date: string): MonthBucket {
@@ -67,6 +67,7 @@ function count(sec: Section, b: MonthBucket, matches: Match[]): boolean {
 export function summarizeCommits(items: CommitInput[], cls: Classifier, evidenceLimit: number): Section {
   const sec = emptySection();
   const months = new Map<string, MonthBucket>();
+  sec.fetched = items.length;
   for (const c of items) {
     if (cls.isIgnoredCommit(c)) continue;
     sec.total++;
@@ -84,6 +85,7 @@ export function summarizeCommits(items: CommitInput[], cls: Classifier, evidence
 export function summarizePulls(items: PullInput[], cls: Classifier, evidenceLimit: number): Section {
   const sec = emptySection();
   const months = new Map<string, MonthBucket>();
+  sec.fetched = items.length;
   for (const p of items) {
     if (cls.isIgnoredPull(p)) continue;
     sec.total++;
@@ -121,8 +123,8 @@ export async function fetchRepoData(input: string, opts: AnalyzeOptions = {}): P
   const since = new Date(now.getTime() - days * 86_400_000).toISOString();
   const repo = await client.repo(fullName);
   const [commits, pulls] = await Promise.all([
-    client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits),
-    client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls),
+    client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits, now.toISOString()),
+    client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls, now.toISOString()),
   ]);
   return { repo, commits, pulls, since, until: now.toISOString(), days };
 }
