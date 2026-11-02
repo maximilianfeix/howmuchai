@@ -27,6 +27,30 @@
 ## What it finds
 
 <!-- findings:start -->
+Snapshot of 976 of the 1,000 most-starred GitHub repos with a push in the last 30 days, 2026-11-02. [Live leaderboard](https://maximilianfeix.github.io/howmuchai/leaderboard/)
+
+- **69%** of them (677) have at least one AI-signed commit in the last 90 days.
+- **16%** of all 216,440 commits read carry an agent signature.
+- By commits: Claude Code 28,557 (in 618 repos), GitHub Copilot 2,218 (in 185 repos), Cursor 1,817 (in 182 repos), Capy 867 (in 5 repos), OpenAI Codex 650 (in 66 repos).
+
+| Repo | AI-signed commits | Mostly |
+|---|---:|---|
+| [colbymchenry/codegraph](https://maximilianfeix.github.io/howmuchai/r/colbymchenry/codegraph/) | 100% of 500 | Claude Code |
+| [shanraisshan/claude-code-best-practice](https://maximilianfeix.github.io/howmuchai/r/shanraisshan/claude-code-best-practice/) | 100% of 492 | Claude Code |
+| [garrytan/gbrain](https://maximilianfeix.github.io/howmuchai/r/garrytan/gbrain/) | 99% of 380 | Capy |
+| [exo-explore/exo](https://maximilianfeix.github.io/howmuchai/r/exo-explore/exo/) | 99% of 124 | Claude Code |
+| [modelcontextprotocol/servers](https://maximilianfeix.github.io/howmuchai/r/modelcontextprotocol/servers/) | 99% of 311 | Claude Code |
+| [RSSNext/Folo](https://maximilianfeix.github.io/howmuchai/r/rssnext/folo/) | 98% of 489 | Claude Code |
+| [pbakaus/impeccable](https://maximilianfeix.github.io/howmuchai/r/pbakaus/impeccable/) | 96% of 307 | Claude Code |
+| [ColorlibHQ/AdminLTE](https://maximilianfeix.github.io/howmuchai/r/colorlibhq/adminlte/) | 96% of 50 | Claude Code |
+| [nektos/act](https://maximilianfeix.github.io/howmuchai/r/nektos/act/) | 95% of 66 | Cursor |
+| [vinta/awesome-python](https://maximilianfeix.github.io/howmuchai/r/vinta/awesome-python/) | 95% of 439 | Claude Code |
+| [JuliusBrussee/caveman](https://maximilianfeix.github.io/howmuchai/r/juliusbrussee/caveman/) | 94% of 407 | Claude Code |
+| [hugohe3/ppt-master](https://maximilianfeix.github.io/howmuchai/r/hugohe3/ppt-master/) | 93% of 491 | Claude Code |
+
+Repos with at least 50 commits in the window. Lower bound: only disclosed signatures count.
+
+Some well-known projects (newest up to 500 commits each, 2026-11-02): [microsoft/vscode](https://maximilianfeix.github.io/howmuchai/r/microsoft/vscode/) 89% (GitHub Copilot), [n8n-io/n8n](https://maximilianfeix.github.io/howmuchai/r/n8n-io/n8n/) 52%, [electron/electron](https://maximilianfeix.github.io/howmuchai/r/electron/electron/) 49%, [home-assistant/core](https://maximilianfeix.github.io/howmuchai/r/home-assistant/core/) 49%, [rails/rails](https://maximilianfeix.github.io/howmuchai/r/rails/rails/) 27%, [nodejs/node](https://maximilianfeix.github.io/howmuchai/r/nodejs/node/) 26% (mostly `Assisted-by: Codex`), [huggingface/transformers](https://maximilianfeix.github.io/howmuchai/r/huggingface/transformers/) 20%, [microsoft/TypeScript](https://maximilianfeix.github.io/howmuchai/r/microsoft/typescript/) 15%, [pytorch/pytorch](https://maximilianfeix.github.io/howmuchai/r/pytorch/pytorch/) 15%, [oven-sh/bun](https://maximilianfeix.github.io/howmuchai/r/oven-sh/bun/) 10%, [python/cpython](https://maximilianfeix.github.io/howmuchai/r/python/cpython/) 6%, [vercel/next.js](https://maximilianfeix.github.io/howmuchai/r/vercel/next.js/) 5%, [torvalds/linux](https://maximilianfeix.github.io/howmuchai/r/torvalds/linux/) 1.5% (`Assisted-by:` trailers), and 0% for kubernetes, rust, django and deno.
 <!-- findings:end -->
 
 ## Use it
