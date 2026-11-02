@@ -9,12 +9,14 @@
  *   skip.json          { [fullName]: reason }           repos that cannot be measured
  *   data/repos/<owner>/<repo>.json, badge/…, card/…, data/leaderboard.json
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { buildReport, DEFAULTS, fetchRepoData, type RepoData } from "../src/core/analyze";
 import { badgePath, buildBoard, cardPath, reportPath, toEntry, type Board, type BoardEntry } from "../src/core/dataset";
 import { GitHubClient, GitHubError } from "../src/core/github";
 import { renderBadge, renderCard, shieldsJson } from "../src/core/render";
+import { validateBoard, validateRepoData, validateReport } from "../src/core/validate";
+import { writeAtomic } from "./lib/fsutil";
 import { REPORT_SCHEMA, type Report } from "../src/core/types";
 
 const args = process.argv.slice(2);
@@ -41,9 +43,16 @@ function readJson<T>(file: string, fallback: T): T {
   return existsSync(p) ? (JSON.parse(readFileSync(p, "utf8")) as T) : fallback;
 }
 function writeFile(file: string, content: string) {
-  const p = join(DATA, file);
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, content);
+  writeAtomic(join(DATA, file), content);
+}
+
+/** Moves an unreadable or invalid report aside so that it is measured again instead of crashing the run. */
+function quarantine(rel: string, why: string) {
+  const from = join(DATA, rel);
+  const to = join(DATA, "quarantine", `${rel.replace(/\//g, "__")}.${Date.now()}`);
+  mkdirSync(dirname(to), { recursive: true });
+  renameSync(from, to);
+  console.log(`quarantined ${rel}: ${why}`);
 }
 
 interface SearchResult {
@@ -68,14 +77,23 @@ function storedReport(fullName: string): Report | null {
   if (!existsSync(p)) return null;
   try {
     const rep = JSON.parse(readFileSync(p, "utf8")) as Report;
-    return rep.schema === REPORT_SCHEMA ? rep : null; // older schema: measure again
-  } catch {
+    if (rep.schema !== REPORT_SCHEMA) return null; // older schema: measure again
+    const v = validateReport(rep);
+    if (!v.ok) {
+      quarantine(reportPath(fullName), v.errors.join("; "));
+      return null;
+    }
+    return v.value;
+  } catch (e) {
+    quarantine(reportPath(fullName), e instanceof Error ? e.message : String(e));
     return null;
   }
 }
 
 function writeReport(raw: RepoData): Report {
   const rep = buildReport(raw);
+  const v = validateReport(rep);
+  if (!v.ok) throw new Error(`built an invalid report for ${raw.repo.fullName}: ${v.errors.join("; ")}`);
   writeFile(reportPath(rep.repo.fullName), JSON.stringify(rep) + "\n");
   writeFile(badgePath(rep.repo.fullName), renderBadge(rep));
   writeFile(badgePath(rep.repo.fullName).replace(/\.svg$/, ".json"), JSON.stringify(shieldsJson(rep)));
@@ -94,7 +112,19 @@ async function main() {
     if (!RAW) throw new Error("--reclassify needs --raw <dir>");
     let n = 0;
     for (const f of walk(RAW)) {
-      writeReport(JSON.parse(readFileSync(f, "utf8")) as RepoData);
+      let raw: unknown;
+      try {
+        raw = JSON.parse(readFileSync(f, "utf8"));
+      } catch {
+        console.log(`skip unreadable raw file ${f}`);
+        continue;
+      }
+      const v = validateRepoData(raw);
+      if (!v.ok) {
+        console.log(`skip invalid raw file ${f}: ${v.errors.join("; ")}`);
+        continue;
+      }
+      writeReport(raw as RepoData);
       n++;
     }
     console.log(`rebuilt ${n} reports from raw data`);
@@ -138,11 +168,7 @@ async function main() {
       const r = queue.shift()!;
       try {
         const raw = await fetchRepoData(r, { client });
-        if (RAW) {
-          const p = join(RAW, `${raw.repo.fullName.toLowerCase()}.json`);
-          mkdirSync(dirname(p), { recursive: true });
-          writeFileSync(p, JSON.stringify(raw));
-        }
+        if (RAW) writeAtomic(join(RAW, `${raw.repo.fullName.toLowerCase()}.json`), JSON.stringify(raw));
         const rep = writeReport(raw);
         done++;
         console.log(`${String(done).padStart(4)} ${rep.repo.fullName}: ${rep.commits.ai}/${rep.commits.total} commits, ${rep.pulls.ai}/${rep.pulls.total} PRs`);
@@ -170,12 +196,15 @@ async function main() {
   if (existsSync(reposDir)) {
     for (const owner of readdirSync(reposDir)) {
       for (const f of readdirSync(join(reposDir, owner))) {
-        const rep = JSON.parse(readFileSync(join(reposDir, owner, f), "utf8")) as Report;
-        if (rep.schema === REPORT_SCHEMA) entries.push(toEntry(rep));
+        const rep = storedReport(`${owner}/${f.replace(/\.json$/, "")}`);
+        if (rep) entries.push(toEntry(rep));
       }
     }
   }
   const board: Board = buildBoard(entries, top.top, tracked.repos, top.generatedAt, DEFAULTS.days, new Date());
+  const vb = validateBoard(board);
+  if (!vb.ok) throw new Error(`refusing to write an invalid leaderboard: ${vb.errors.join("; ")}`);
+  // Written last, so that the board only ever points at reports that exist.
   writeFile("data/leaderboard.json", JSON.stringify(board) + "\n");
   console.log(`measured ${done}, leaderboard has ${board.repos.length} repos (top cohort ${board.cohort?.measured}/${board.cohort?.selected}), ${client.requests} requests, ${client.lastRate?.remaining ?? "?"} left`);
 }

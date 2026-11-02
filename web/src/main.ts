@@ -5,7 +5,8 @@ import { escapeXml as esc, formatShare } from "../../src/core/format";
 import { GitHubClient, GitHubError } from "../../src/core/github";
 import { agentColor, agentName, registry } from "../../src/core/registry";
 import { coverageLabel, periodLabel, renderCard } from "../../src/core/render";
-import { REPORT_SCHEMA, type Report, type Section } from "../../src/core/types";
+import type { Report, Section } from "../../src/core/types";
+import { validateBoard, validateReport } from "../../src/core/validate";
 
 const BASE = import.meta.env.BASE_URL; // "/howmuchai/" or "/"
 const SITE = __SITE__; // absolute site URL without trailing slash
@@ -83,7 +84,11 @@ function legendHtml(sec: Section, unit: string): string {
 let boardCache: Promise<Board | null> | null = null;
 function loadBoard(): Promise<Board | null> {
   boardCache ??= fetch(url("data/leaderboard.json"))
-    .then((r) => (r.ok ? (r.json() as Promise<Board>) : null))
+    .then(async (r) => {
+      if (!r.ok) return null;
+      const v = validateBoard(await r.json());
+      return v.ok ? v.value : null;
+    })
     .catch(() => null);
   return boardCache;
 }
@@ -92,9 +97,9 @@ async function loadStored(fullName: string): Promise<Report | null> {
   try {
     const r = await fetch(url(reportPath(fullName)));
     if (!r.ok) return null;
-    const rep = (await r.json()) as Report;
-    // Older reports counted hints as signatures; measure those live instead.
-    return rep.schema === REPORT_SCHEMA ? rep : null;
+    // Older or damaged reports are measured live instead.
+    const v = validateReport(await r.json());
+    return v.ok ? v.value : null;
   } catch {
     return null;
   }

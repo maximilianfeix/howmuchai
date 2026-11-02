@@ -12,6 +12,7 @@ import { ogPath, pagePath } from "../src/core/dataset";
 import { escapeXml, formatShare } from "../src/core/format";
 import { agentName } from "../src/core/registry";
 import { periodLabel, renderOg } from "../src/core/render";
+import { validateBoard, validateReport } from "../src/core/validate";
 import type { Report } from "../src/core/types";
 
 const args = process.argv.slice(2);
@@ -48,6 +49,26 @@ function page(opts: { title: string; description: string; og: string; url: strin
 function walk(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+}
+
+// 0. refuse to build a site from invalid data
+const problems: string[] = [];
+const boardFile = join(DATA, "data/leaderboard.json");
+if (existsSync(boardFile)) {
+  const vb = validateBoard(JSON.parse(readFileSync(boardFile, "utf8")));
+  if (!vb.ok) problems.push(`leaderboard: ${vb.errors.join("; ")}`);
+}
+for (const f of walk(join(DATA, "data/repos")).filter((f) => f.endsWith(".json"))) {
+  try {
+    const v = validateReport(JSON.parse(readFileSync(f, "utf8")));
+    if (!v.ok) problems.push(`${f}: ${v.errors.slice(0, 3).join("; ")}`);
+  } catch (e) {
+    problems.push(`${f}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+if (problems.length) {
+  console.error(`invalid data, nothing assembled:\n${problems.slice(0, 30).join("\n")}`);
+  process.exit(1);
 }
 
 // 1. data, badges and cards
