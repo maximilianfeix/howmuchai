@@ -11,7 +11,9 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { buildReport, DEFAULTS, fetchRepoData, type RepoData } from "../src/core/analyze";
+import { buildReport, DEFAULTS, fetchRepoData, GATE_DISCLOSED, type RepoData } from "../src/core/analyze";
+import { createClassifier } from "../src/core/classify";
+import { registry } from "../src/core/registry";
 import { badgePath, buildBoard, cardPath, reportPath, toEntry, type Board, type BoardEntry } from "../src/core/dataset";
 import { GitHubClient, GitHubError } from "../src/core/github";
 import { renderBadge, renderCard, shieldsJson } from "../src/core/render";
@@ -31,12 +33,14 @@ const REFRESH_HOURS = Number(arg("--refresh-hours", "20"));
 const TOP_N = Number(arg("--top", "1000"));
 const RAW = arg("--raw", "");
 const RECLASSIFY = args.includes("--reclassify");
+const ENRICH = args.includes("--enrich");
 const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 if (!token && !RECLASSIFY) {
   console.error("GITHUB_TOKEN is required");
   process.exit(1);
 }
 const client = new GitHubClient({ token, userAgent: "howmuchai-crawler" });
+const cls = createClassifier(registry);
 
 function readJson<T>(file: string, fallback: T): T {
   const p = join(DATA, file);
@@ -107,7 +111,34 @@ function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
 }
 
+/** Adds setup files and the pre-2022 baseline to raw data that was fetched before they existed. */
+async function enrich() {
+  if (!RAW) throw new Error("--enrich needs --raw <dir>");
+  let n = 0;
+  for (const f of walk(RAW)) {
+    if (client.lastRate && client.lastRate.remaining < RESERVE) {
+      console.log(`stopping: ${client.lastRate.remaining} requests left`);
+      break;
+    }
+    const raw = JSON.parse(readFileSync(f, "utf8")) as RepoData;
+    if (raw.setup !== undefined && raw.setup !== null) continue;
+    try {
+      raw.setup = await client.agentSetup(raw.repo.fullName);
+      const signed = raw.commits.items.filter((c) => cls.commit(c).some((m) => m.confidence === "high")).length;
+      raw.baseline = signed >= GATE_DISCLOSED || raw.setup.length > 0 ? await client.baseline(raw.repo.fullName) : [];
+      writeAtomic(f, JSON.stringify(raw));
+      writeReport(raw);
+      n++;
+    } catch (e) {
+      if (e instanceof GitHubError && e.resetAt) break;
+      console.log(`enrich ${raw.repo.fullName}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  console.log(`enriched ${n} repos`);
+}
+
 async function main() {
+  if (ENRICH) await enrich();
   if (RECLASSIFY) {
     if (!RAW) throw new Error("--reclassify needs --raw <dir>");
     let n = 0;
@@ -130,7 +161,7 @@ async function main() {
     console.log(`rebuilt ${n} reports from raw data`);
   }
   let top = readJson<{ generatedAt: string; top: string[] }>("repos.json", { generatedAt: "1970-01-01T00:00:00Z", top: [] });
-  if (!RECLASSIFY && (Date.now() - Date.parse(top.generatedAt) > 7 * 86_400_000 || top.top.length === 0)) {
+  if (!RECLASSIFY && !ENRICH && (Date.now() - Date.parse(top.generatedAt) > 7 * 86_400_000 || top.top.length === 0)) {
     console.log("refreshing the list of top repositories");
     top = { generatedAt: new Date().toISOString(), top: await refreshTop() };
     writeFile("repos.json", JSON.stringify(top, null, 1) + "\n");
@@ -165,7 +196,7 @@ async function main() {
 
   let done = 0;
   let stop = false;
-  const queue = RECLASSIFY ? [] : due.map((d) => d.r);
+  const queue = RECLASSIFY || ENRICH ? [] : due.map((d) => d.r);
   const CONCURRENCY = Number(arg("--concurrency", "3"));
   async function worker() {
     while (!stop && queue.length > 0 && done < MAX) {
