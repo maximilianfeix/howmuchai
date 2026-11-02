@@ -50,8 +50,9 @@ function fit(data: Ex[], l2 = 1e-3, iters = 300, lr = 0.5): StyleModel {
     for (const e of data) { const err = (1 / (1 + Math.exp(-z(e.x))) - e.y) * (e.y ? wp : wn); e.x.forEach((v, i) => (gw[i] += (err * (v - mu[i])) / sd[i])); gb += err; }
     w = w.map((wi, i) => wi - lr * (gw[i] / data.length + l2 * wi)); b -= (lr * gb) / data.length;
   }
-  const model: StyleModel = { version: 1, trainedAt: new Date().toISOString().slice(0, 10), features: FEATURE_NAMES, weights: w.map((v) => +v.toFixed(5)), bias: +b.toFixed(5), mean: mu.map((v) => +v.toFixed(5)), scale: sd.map((v) => +v.toFixed(5)), humanMean: 0, agentMean: 0 };
-  const h = data.filter((e) => !e.y).map((e) => score(model, e.msg)), a = data.filter((e) => e.y).map((e) => score(model, e.msg));
+  const model: StyleModel = { version: 2, trainedAt: new Date().toISOString().slice(0, 10), features: FEATURE_NAMES, weights: w.map((v) => +v.toFixed(5)), bias: +b.toFixed(5), mean: mu.map((v) => +v.toFixed(5)), scale: sd.map((v) => +v.toFixed(5)), humanMean: 0, agentMean: 0, trainedOn: { agent: data.filter((e) => e.y).length, human: data.filter((e) => !e.y).length, repos: new Set(data.map((e) => e.g)).size } };
+  // Only judgeable messages are scored at inference time, so the fallback references use only those too.
+  const h = data.filter((e) => !e.y && isJudgeable(e.msg)).map((e) => score(model, e.msg)), a = data.filter((e) => e.y && isJudgeable(e.msg)).map((e) => score(model, e.msg));
   model.humanMean = +(h.reduce((s, x) => s + x, 0) / h.length).toFixed(4);
   model.agentMean = +(a.reduce((s, x) => s + x, 0) / a.length).toFixed(4);
   return model;

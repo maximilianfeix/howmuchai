@@ -13,7 +13,7 @@ inputs:
     required: false
     default: "90"
   output-dir:
-    description: Where card-dark.svg, card-light.svg, badge.svg and report.json are written.
+    description: Where card-dark.svg, card-light.svg, badge.svg, badge-likely.svg and report.json are written.
     required: false
     default: .github/howmuchai
   commit:
@@ -31,6 +31,8 @@ outputs:
     description: Number of AI-signed commits.
   commits:
     description: Number of commits counted.
+  likely:
+    description: Experimental likely AI share, e.g. "45–68%", or "≥13%" (the disclosed share) when there is no estimate.
 runs:
   using: node24
   main: action/index.mjs

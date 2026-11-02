@@ -32,12 +32,12 @@ The 90% interval contained the true share in **100.0%** of 125 cases.
 
 | Project | Disclosed AI commits | Ungated estimate | Shown |
 |---|---:|---:|---|
-| FFmpeg/FFmpeg | 77 | – | estimated |
-| NetBSD/src | 0 | 7.1% (0.0–36.1) | **not estimated** (fewer than 10 disclosed) |
-| curl/curl | 1 | 87.0% (74.6–100.0) | **not estimated** (fewer than 10 disclosed) |
-| gentoo/gentoo | 0 | 20.2% (0.0–49.9) | **not estimated** (fewer than 10 disclosed) |
-| git/git | 5 | 20.9% (0.0–42.4) | **not estimated** (fewer than 10 disclosed) |
-| openbsd/src | 0 | – | **not estimated** (fewer than 10 disclosed) |
-| postgres/postgres | 0 | 98.3% (82.7–100.0) | **not estimated** (fewer than 10 disclosed) |
-| qemu/qemu | 0 | 74.0% (63.3–83.7) | **not estimated** (fewer than 10 disclosed) |
-| systemd/systemd | 0 | 73.2% (62.7–82.6) | **not estimated** (fewer than 10 disclosed) |
+| FFmpeg/FFmpeg | 77 | 40.9% (21.1–56.9) | estimated |
+| NetBSD/src | 0 | 3.9% (0.0–22.0) | **not estimated** (fewer than 10 disclosed) |
+| curl/curl | 1 | 55.3% (45.8–64.0) | **not estimated** (fewer than 10 disclosed) |
+| gentoo/gentoo | 0 | 14.0% (0.0–36.1) | **not estimated** (fewer than 10 disclosed) |
+| git/git | 5 | 13.0% (0.0–27.6) | **not estimated** (fewer than 10 disclosed) |
+| openbsd/src | 0 | 0.0% (0.0–15.6) | **not estimated** (fewer than 10 disclosed) |
+| postgres/postgres | 0 | 54.2% (43.9–63.2) | **not estimated** (fewer than 10 disclosed) |
+| qemu/qemu | 0 | 49.7% (41.6–57.0) | **not estimated** (fewer than 10 disclosed) |
+| systemd/systemd | 0 | 49.2% (40.6–56.6) | **not estimated** (fewer than 10 disclosed) |

@@ -910,28 +910,31 @@ function rng(seed) {
 }
 function prevalence(S, H, A, seed = 42, rounds = 400, minGap = 0.1) {
   if (S.length === 0) return null;
-  const one = (s, h, a) => {
+  const one = (s, h, a, gap) => {
     const hm = typeof h === "number" ? h : mean(h);
     const am = typeof a === "number" ? a : mean(a);
-    if (am - hm < minGap) return NaN;
+    if (!(am - hm > gap)) return NaN;
     return Math.min(1, Math.max(0, (mean(s) - hm) / (am - hm)));
   };
-  const point = one(S, H, A);
+  const point = one(S, H, A, minGap - 1e-12);
   if (Number.isNaN(point)) return null;
   const r = rng(seed);
   const resample = (x) => x.map(() => x[Math.floor(r() * x.length)]);
   const boots = [];
+  let unidentifiable = 0;
   for (let i = 0; i < rounds; i++) {
-    const v = one(resample(S), typeof H === "number" ? H : resample(H), typeof A === "number" ? A : resample(A));
-    if (!Number.isNaN(v)) boots.push(v);
+    const v = one(resample(S), typeof H === "number" ? H : resample(H), typeof A === "number" ? A : resample(A), 1e-6);
+    if (Number.isNaN(v)) unidentifiable++;
+    else boots.push(v);
   }
+  if (unidentifiable > 0.05 * rounds) return { point, lo: 0, hi: 1 };
   boots.sort((a, b) => a - b);
   return { point, lo: boots[Math.floor(0.05 * (boots.length - 1))] ?? point, hi: boots[Math.ceil(0.95 * (boots.length - 1))] ?? point };
 }
 
 // src/core/style-model.json
 var style_model_default = {
-  version: 1,
+  version: 2,
   trainedAt: "2026-11-02",
   features: [
     "log subject length (without prefix)",
@@ -1018,8 +1021,13 @@ var style_model_default = {
     0.07306,
     0.32422
   ],
-  humanMean: 0.2751,
-  agentMean: 0.724
+  humanMean: 0.3608,
+  agentMean: 0.8439,
+  trainedOn: {
+    agent: 14554,
+    human: 13021,
+    repos: 152
+  }
 };
 
 // src/core/style.ts
@@ -1213,7 +1221,9 @@ function beyondSignatures(d, cls) {
   if (signed.size < GATE_DISCLOSED) return { ...beyond, reason: (d.setup?.length ?? 0) > 0 ? "setup-only" : "no-evidence" };
   const gate = "disclosed";
   const isBot = (c) => /\[bot\]$/i.test(c.authorLogin ?? "") || /\[bot\]$/i.test(c.authorName ?? "");
-  const undisclosed = items.filter((c) => !signed.has(c) && !isBot(c));
+  const unsigned = items.filter((c) => !signed.has(c));
+  const undisclosed = unsigned.filter((c) => !isBot(c));
+  const bots = unsigned.length - undisclosed.length;
   const judged = undisclosed.filter((c) => isJudgeable(c.message));
   const short = undisclosed.length - judged.length;
   if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
@@ -1229,20 +1239,23 @@ function beyondSignatures(d, cls) {
   else return { ...beyond, reason: "too-little-history" };
   const p = prevalence(S, H, A, 42, 400, 0.2);
   if (!p) return { ...beyond, reason: "inseparable" };
-  if (p.hi - p.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
+  const n = items.length;
+  const likely = {
+    point: (signed.size + p.point * undisclosed.length) / n,
+    lo: (signed.size + p.lo * judged.length) / n,
+    hi: (signed.size + p.hi * judged.length + short) / n
+  };
+  if (p.hi - p.lo > MAX_RANGE || likely.hi - likely.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
   beyond.estimate = {
     ...p,
     gate,
     humanReference: typeof H === "number" ? "training" : "own-history",
     aiReference: typeof A === "number" ? "training" : "repo",
-    tooShort: short
+    tooShort: short,
+    judged: judged.length,
+    bots
   };
-  const n = items.length;
-  beyond.likely = {
-    point: (signed.size + p.point * undisclosed.length) / n,
-    lo: (signed.size + p.lo * judged.length) / n,
-    hi: (signed.size + p.hi * undisclosed.length) / n
-  };
+  beyond.likely = likely;
   return beyond;
 }
 function buildReport(d, opts = {}) {
@@ -1284,8 +1297,27 @@ function formatShare(n, d) {
   if (v < 10) return `${v.toFixed(1).replace(/\.0$/, "")}%`;
   return `${Math.round(v)}%`;
 }
+function formatRange(lo, hi) {
+  const a = Math.round(lo * 100);
+  const b = Math.round(hi * 100);
+  return a === b ? `${a}%` : `${a}\u2013${b}%`;
+}
 function escapeXml(s) {
   return s.replace(/[<>&'"]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&#39;", '"': "&quot;" })[ch]);
+}
+var NO_ESTIMATE = {
+  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
+  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
+  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
+  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
+  "all-disclosed": "every commit already carries a signature",
+  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
+  inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "too-uncertain": "the possible range would be wider than 50 percentage points",
+  "no-commits": "there are no commits in this period"
+};
+function noEstimateReason(reason) {
+  return NO_ESTIMATE[reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"];
 }
 
 // src/core/render.ts
@@ -1350,14 +1382,15 @@ function renderCard(r, theme = "dark") {
   parts.push(`<g clip-path="url(#hm-bar)">${segs.join("")}</g>`);
   parts.push(text(23, 160, p.muted, MONO, 11, periodLabel(r)));
   parts.push(text(473, 160, p.muted, SANS, 10, `${formatShare(sec.total - sec.ai, sec.total)} no signature found`, `text-anchor="end"`));
-  parts.push(text(23, 181, p.muted, SANS, 10, "Disclosed signatures; a lower bound."));
-  parts.push(markGroup(379, 155, 0.064453125, p.text, p.accent));
-  parts.push(text(412, 178, p.text, SANS, 11, "howmuchai", `font-weight="650"`));
+  const likely = r.beyond?.likely;
+  parts.push(text(23, 181, p.muted, SANS, 10, likely ? `A lower bound. Estimated likely ${formatRange(likely.lo, likely.hi)} (experimental).` : "Disclosed signatures; a lower bound."));
+  parts.push(markGroup(386, 166, 0.046875, p.text, p.accent));
+  parts.push(text(412, 183, p.text, SANS, 11, "howmuchai", `font-weight="650"`));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="495" height="195" viewBox="0 0 495 195" role="img" aria-labelledby="hm-t hm-d"><title id="hm-t">${escapeXml(`${r.repo.fullName}: ${share} AI-signed commits`)}</title><desc id="hm-d">${escapeXml(desc)}</desc>${parts.join("")}</svg>`;
 }
 function textWidth(s) {
   let w = 0;
-  for (const ch of s) w += /[il.,:;|!'1]/.test(ch) ? 3.5 : /[mwMW%—]/.test(ch) ? 9.5 : /[A-Z0-9#]/.test(ch) ? 7.5 : 6.5;
+  for (const ch of s) w += /[il.,:;|!'1]/.test(ch) ? 3.5 : /[mwMW%—≥]/.test(ch) ? 9.5 : /[A-Z0-9#]/.test(ch) ? 7.5 : 6.5;
   return Math.ceil(w);
 }
 function renderBadge(r, label = "AI-signed") {
@@ -1368,6 +1401,22 @@ function renderBadge(r, label = "AI-signed") {
   const fill = r && r.commits.total > 0 ? "#4056BC" : "#52627A";
   const title = r ? `${label}: ${value} of recent commits in ${r.repo.fullName}` : `${label}: unavailable`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" viewBox="0 0 ${w} 20" role="img" aria-label="${escapeXml(title)}"><title>${escapeXml(title)}</title><clipPath id="hm-r"><rect width="${w}" height="20" rx="3"/></clipPath><g clip-path="url(#hm-r)"><rect width="${lw}" height="20" fill="#34445A"/><rect x="${lw}" width="${vw}" height="20" fill="${fill}"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana, ${SANS}" font-size="11">${`<text x="${lw / 2}" y="14">${escapeXml(label)}</text><text x="${lw + vw / 2}" y="14">${escapeXml(value)}</text>`}</g></svg>`;
+}
+function likelyValue(r) {
+  const l = r.beyond?.likely;
+  if (l) return formatRange(l.lo, l.hi);
+  if (r.commits.total === 0) return "\u2014";
+  return `\u2265${formatShare(r.commits.ai, r.commits.total)}`;
+}
+function renderLikelyBadge(r) {
+  const label = "AI likely";
+  const value = likelyValue(r);
+  const lw = textWidth(label) + 14;
+  const vw = textWidth(value) + 14;
+  const w = lw + vw;
+  const fill = r.beyond?.likely ? "#6E56CF" : r.commits.total > 0 ? "#4056BC" : "#52627A";
+  const title = r.beyond?.likely ? `${r.repo.fullName}: likely ${value} of recent commits involve an AI agent (experimental estimate; ${formatShare(r.commits.ai, r.commits.total)} disclosed)` : `${r.repo.fullName}: at least ${value.replace("\u2265", "")} of recent commits disclose an AI agent; no estimate beyond that`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" viewBox="0 0 ${w} 20" role="img" aria-label="${escapeXml(title)}"><title>${escapeXml(title)}</title><clipPath id="hm-l"><rect width="${w}" height="20" rx="3"/></clipPath><g clip-path="url(#hm-l)"><rect width="${lw}" height="20" fill="#34445A"/><rect x="${lw}" width="${vw}" height="20" fill="${fill}"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana, ${SANS}" font-size="11"><text x="${lw / 2}" y="14">${escapeXml(label)}</text><text x="${lw + vw / 2}" y="14">${escapeXml(value)}</text></g></svg>`;
 }
 
 // src/action/index.ts
@@ -1394,11 +1443,13 @@ async function run() {
   writeFileSync(join(dir, "card-dark.svg"), renderCard(r, "dark"));
   writeFileSync(join(dir, "card-light.svg"), renderCard(r, "light"));
   writeFileSync(join(dir, "badge.svg"), renderBadge(r));
+  writeFileSync(join(dir, "badge-likely.svg"), renderLikelyBadge(r));
   writeFileSync(join(dir, "report.json"), JSON.stringify(r, null, 2) + "\n");
   const share = formatShare(r.commits.ai, r.commits.total);
   setOutput("share", share);
   setOutput("ai-commits", String(r.commits.ai));
   setOutput("commits", String(r.commits.total));
+  setOutput("likely", likelyValue(r));
   console.log(`${r.repo.fullName}: ${share} AI-signed commits (${r.commits.ai} of ${r.commits.total}, ${periodLabel(r)})`);
   if (process.env.GITHUB_STEP_SUMMARY) {
     const rows = Object.entries(r.commits.byAgent).sort((a, b) => b[1] - a[1]).map(([id, n]) => `| ${agentName(id)} | ${n} | ${formatShare(n, r.commits.total)} |`).join("\n");
@@ -1412,14 +1463,16 @@ ${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r
 |---|---:|---:|
 ${rows || "| No signatures found | 0 | 0% |"}
 
-Counts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)
+Beyond signatures (experimental): ${r.beyond?.likely ? `likely ${likelyValue(r)} AI-involved` : `no estimate, because ${noEstimateReason(r.beyond?.reason)}`}.
+
+The headline counts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)
 `
     );
   }
   if (commit) {
     git(["config", "user.name", "github-actions[bot]"]);
     git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "report.json"].map((f) => join(dir, f));
+    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "badge-likely.svg", "report.json"].map((f) => join(dir, f));
     git(["add", "--", ...files]);
     try {
       execFileSync("git", ["diff", "--cached", "--quiet", "--", ...files]);

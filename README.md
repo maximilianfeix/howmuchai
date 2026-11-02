@@ -78,6 +78,12 @@ Tracked repos (the top 1,000 and every repo someone [asked for](https://github.c
 
 Use lower-case `owner/repo` in the URL. `-light.svg` gives the light card.
 
+There is also a badge with the experimental likely range from [Beyond signatures](#beyond-signatures-experimental). It reads `AI likely | 45–68%` where there is enough evidence, and otherwise `AI likely | ≥13%`, the disclosed share as a lower bound:
+
+```markdown
+[![AI likely](https://maximilianfeix.github.io/howmuchai/badge/likely/OWNER/REPO.svg)](https://maximilianfeix.github.io/howmuchai/r/OWNER/REPO/)
+```
+
 ### GitHub Action
 
 Measure your own repo on your own schedule and keep the files in the repo:
@@ -98,7 +104,7 @@ jobs:
       - uses: maximilianfeix/howmuchai@v0
 ```
 
-It writes `.github/howmuchai/card-dark.svg`, `card-light.svg`, `badge.svg` and `report.json`, commits them, and adds a summary to the run. Inputs: `repository`, `days` (90), `output-dir`, `commit` (`true`), `token`. Outputs: `share`, `ai-commits`, `commits`.
+It writes `.github/howmuchai/card-dark.svg`, `card-light.svg`, `badge.svg`, `badge-likely.svg` and `report.json`, commits them, and adds a summary to the run. Inputs: `repository`, `days` (90), `output-dir`, `commit` (`true`), `token`. Outputs: `share`, `ai-commits`, `commits`, `likely`.
 
 ```markdown
 ![AI-signed commits](.github/howmuchai/badge.svg)
@@ -131,7 +137,7 @@ Many people remove agent signatures, so a repo built entirely with agents can sh
 
 - **Authors who disclose agent use:** the share of commits by people who sign at least one other commit in the window.
 - **Agent setup files:** `CLAUDE.md`, `AGENTS.md`, `.cursor/`, `GEMINI.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml` and others.
-- **A style estimate with a 90% interval:** a small logistic model of commit-message style, trained on about 30,000 disclosed agent commits (signatures removed) against 13,000 commits from before coding agents in the same repositories. It compares a repo's undisclosed commits with that repo's own commits from before July 2022 and with its disclosed agent commits.
+- **A style estimate with a 90% interval:** a small logistic model of commit-message style, trained on about 14,500 disclosed agent commits (signatures removed) against 13,000 commits from before coding agents in the same 152 repositories (exact numbers in [eval/STYLE.md](eval/STYLE.md)). It compares a repo's undisclosed commits with that repo's own commits from before July 2022 and with its disclosed agent commits.
 
 ```
 maximilianfeix/proxy-scraper

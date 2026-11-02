@@ -143,3 +143,45 @@ describe("beyond signatures, review fixes", () => {
     expect(stripSignatures("aider: fix typo (aider)")).toBe("fix typo");
   });
 });
+
+describe("beyond signatures, review 3", () => {
+  it("counts short unknown commits as possibly AI at the high end", () => {
+    const d = data({ signed: 20, undisclosedAgentStyle: 0, human: 40, baseline: 60 });
+    for (let i = 0; i < 30; i++) d.commits.items.push({ sha: `t${i}`, message: "fix typo", date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/t${i}`, authorLogin: "other", parents: 1 });
+    const r = buildReport(d);
+    const l = r.beyond!.likely!, e = r.beyond!.estimate!;
+    expect(e.tooShort).toBe(30);
+    expect(e.judged).toBe(40);
+    // all 30 short commits could be AI-involved
+    expect(l.hi).toBeGreaterThanOrEqual((20 + 30) / 90 - 1e-9);
+    expect(l.lo).toBeLessThanOrEqual(l.point);
+    expect(l.point).toBeLessThanOrEqual(l.hi);
+  });
+
+  it("refuses when the displayed range would be too wide because of unknown commits", () => {
+    const d = data({ signed: 20, undisclosedAgentStyle: 0, human: 25, baseline: 60 });
+    for (let i = 0; i < 80; i++) d.commits.items.push({ sha: `t${i}`, message: "fix typo", date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/t${i}`, authorLogin: "other", parents: 1 });
+    const r = buildReport(d);
+    expect(r.beyond!.likely).toBeNull();
+    expect(r.beyond!.reason).toBe("too-uncertain");
+  });
+
+  it("reports how many commits were judged and how many bot commits were left out", () => {
+    const d = data({ signed: 20, undisclosedAgentStyle: 10, human: 30, baseline: 60 });
+    for (let i = 0; i < 15; i++) d.commits.items.push({ sha: `k${i}`, message: humanMsg(i), date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/k${i}`, authorLogin: "custom[bot]", parents: 1 });
+    const e = buildReport(d).beyond!.estimate!;
+    expect(e.judged).toBe(40);
+    expect(e.bots).toBe(15);
+  });
+
+  it("keeps bootstrap draws with a small reference gap, so an outlier cannot narrow the interval", () => {
+    const p = prevalence(Array(20).fill(0.25), Array(30).fill(0.1), [...Array(9).fill(0.25), 1], 42, 400, 0.2)!;
+    expect(p.hi).toBe(1);
+  });
+
+  it("gives the whole range when many draws cannot tell the references apart", () => {
+    const A = [...Array(9).fill(0.1), 3];
+    const p = prevalence(Array(20).fill(0.2), Array(30).fill(0.1), A, 42, 400, 0.2)!;
+    expect(p).toEqual({ point: p.point, lo: 0, hi: 1 });
+  });
+});

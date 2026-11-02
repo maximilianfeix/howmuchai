@@ -109,7 +109,7 @@ describe("Action bundle (#12)", () => {
     const { out, summary, env } = actionEnv(work, {});
     const r = run(ACTION, [], env, work);
     expect(r.status, r.stderr).toBe(0);
-    for (const f of ["card-dark.svg", "card-light.svg", "badge.svg", "report.json"]) expect(existsSync(join(work, ".github/howmuchai", f))).toBe(true);
+    for (const f of ["card-dark.svg", "card-light.svg", "badge.svg", "badge-likely.svg", "report.json"]) expect(existsSync(join(work, ".github/howmuchai", f))).toBe(true);
     expect(validateReport(JSON.parse(readFileSync(join(work, ".github/howmuchai/report.json"), "utf8"))).ok).toBe(true);
     expect(readFileSync(out, "utf8")).toContain("share=50%");
     expect(readFileSync(summary, "utf8")).toContain("50% AI-signed commits");

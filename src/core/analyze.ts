@@ -6,7 +6,7 @@ import modelJson from "./style-model.json";
 import { isJudgeable, score, type StyleModel } from "./style";
 import type { Beyond, CommitInput, Evidence, Match, MonthBucket, PullInput, Report, Section } from "./types";
 
-const styleModel = modelJson as StyleModel;
+export const styleModel = modelJson as StyleModel;
 
 export const VERSION = "0.1.0";
 
@@ -200,7 +200,9 @@ export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
   const gate = "disclosed" as const;
   // Bots write in templates; their commits are neither human nor agent writing and stay out of the estimate.
   const isBot = (c: CommitInput) => /\[bot\]$/i.test(c.authorLogin ?? "") || /\[bot\]$/i.test(c.authorName ?? "");
-  const undisclosed = items.filter((c) => !signed.has(c) && !isBot(c));
+  const unsigned = items.filter((c) => !signed.has(c));
+  const undisclosed = unsigned.filter((c) => !isBot(c));
+  const bots = unsigned.length - undisclosed.length;
   // Only messages long enough to carry style are scored; short ones stay unknown and widen the range.
   const judged = undisclosed.filter((c) => isJudgeable(c.message));
   const short = undisclosed.length - judged.length;
@@ -221,23 +223,26 @@ export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
   else return { ...beyond, reason: "too-little-history" };
   const p = prevalence(S, H, A, 42, 400, 0.2);
   if (!p) return { ...beyond, reason: "inseparable" };
-  // A range wider than half the scale says little and is easy to misread.
-  if (p.hi - p.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
+  // Overall: the short commits are unknown, so the low end counts none of them and the high end all of them;
+  // the best estimate assumes they follow the judged ones. Bot commits count as not AI-involved.
+  const n = items.length;
+  const likely = {
+    point: (signed.size + p.point * undisclosed.length) / n,
+    lo: (signed.size + p.lo * judged.length) / n,
+    hi: (signed.size + p.hi * judged.length + short) / n,
+  };
+  // A range wider than half the scale says little and is easy to misread; this applies to what is shown.
+  if (p.hi - p.lo > MAX_RANGE || likely.hi - likely.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
   beyond.estimate = {
     ...p,
     gate,
     humanReference: typeof H === "number" ? "training" : "own-history",
     aiReference: typeof A === "number" ? "training" : "repo",
     tooShort: short,
+    judged: judged.length,
+    bots,
   };
-  // Overall: the short commits are unknown. Low end counts none of them, high end the high rate, the
-  // best estimate assumes they follow the judged ones.
-  const n = items.length;
-  beyond.likely = {
-    point: (signed.size + p.point * undisclosed.length) / n,
-    lo: (signed.size + p.lo * judged.length) / n,
-    hi: (signed.size + p.hi * undisclosed.length) / n,
-  };
+  beyond.likely = likely;
   return beyond;
 }
 

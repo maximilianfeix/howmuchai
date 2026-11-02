@@ -77,7 +77,7 @@ function checkBeyond(b: unknown, errors: string[]) {
   if (b.estimate !== null) {
     checkRange(b.estimate, "beyond.estimate", errors);
     const e = b.estimate as Record<string, unknown>;
-    if (isObj(e) && (!["disclosed", "setup"].includes(e.gate as string) || !isCount(e.tooShort))) errors.push("beyond.estimate fields are invalid");
+    if (isObj(e) && (!["disclosed", "setup"].includes(e.gate as string) || !isCount(e.tooShort) || (e.judged !== undefined && !isCount(e.judged)) || (e.bots !== undefined && !isCount(e.bots)))) errors.push("beyond.estimate fields are invalid");
   }
   if (b.likely !== null) checkRange(b.likely, "beyond.likely", errors);
   if (b.reason !== undefined && b.reason !== null && !["no-commits", "no-evidence", "setup-only", "too-few-disclosed", "too-little-history", "all-disclosed", "too-few-judgeable", "inseparable", "too-uncertain"].includes(b.reason as string)) errors.push("beyond.reason is unknown");
@@ -119,6 +119,12 @@ function checkEntry(e: unknown, i: number, errors: string[]) {
   if (typeof x.capped !== "boolean") errors.push(`repos[${i}].capped is not a boolean`);
   if (!isDate(x.measuredAt)) errors.push(`repos[${i}].measuredAt is not a date`);
   if (x.cohort !== undefined && x.cohort !== "top" && x.cohort !== "tracked") errors.push(`repos[${i}].cohort is unknown`);
+  if (x.likely !== undefined && x.likely !== null) {
+    const l = x.likely as unknown;
+    const ok = isObj(l) && ["lo", "point", "hi"].every((k) => typeof (l as Record<string, unknown>)[k] === "number" && Number.isFinite((l as Record<string, number>)[k]));
+    const { lo, point, hi } = (l ?? {}) as { lo: number; point: number; hi: number };
+    if (!ok || lo < 0 || hi > 1 || lo > point || point > hi) errors.push(`repos[${i}].likely is not a range lo ≤ point ≤ hi in 0..1`);
+  }
 }
 
 export function validateBoard(v: unknown): Checked<Board> {

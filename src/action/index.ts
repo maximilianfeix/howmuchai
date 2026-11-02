@@ -6,10 +6,10 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { analyzeRepo, DEFAULTS } from "../core/analyze";
-import { formatShare } from "../core/format";
+import { formatShare, noEstimateReason } from "../core/format";
 import { GitHubClient } from "../core/github";
 import { agentName } from "../core/registry";
-import { coverageLabel, periodLabel, renderBadge, renderCard } from "../core/render";
+import { coverageLabel, likelyValue, periodLabel, renderBadge, renderCard, renderLikelyBadge } from "../core/render";
 
 function input(name: string, def = ""): string {
   return (process.env[`INPUT_${name.toUpperCase().replace(/ /g, "_")}`] ?? def).trim() || def;
@@ -37,12 +37,14 @@ async function run() {
   writeFileSync(join(dir, "card-dark.svg"), renderCard(r, "dark"));
   writeFileSync(join(dir, "card-light.svg"), renderCard(r, "light"));
   writeFileSync(join(dir, "badge.svg"), renderBadge(r));
+  writeFileSync(join(dir, "badge-likely.svg"), renderLikelyBadge(r));
   writeFileSync(join(dir, "report.json"), JSON.stringify(r, null, 2) + "\n");
 
   const share = formatShare(r.commits.ai, r.commits.total);
   setOutput("share", share);
   setOutput("ai-commits", String(r.commits.ai));
   setOutput("commits", String(r.commits.total));
+  setOutput("likely", likelyValue(r));
   console.log(`${r.repo.fullName}: ${share} AI-signed commits (${r.commits.ai} of ${r.commits.total}, ${periodLabel(r)})`);
 
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -52,7 +54,7 @@ async function run() {
       .join("\n");
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
-      `## howmuchai: ${share} AI-signed commits\n\n${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r.pulls.ai, r.pulls.total)} (${r.pulls.ai} of ${coverageLabel(r.pulls, r, "pull requests")}).\n\n| Agent | Commits | Share |\n|---|---:|---:|\n${rows || "| No signatures found | 0 | 0% |"}\n\nCounts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)\n`,
+      `## howmuchai: ${share} AI-signed commits\n\n${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r.pulls.ai, r.pulls.total)} (${r.pulls.ai} of ${coverageLabel(r.pulls, r, "pull requests")}).\n\n| Agent | Commits | Share |\n|---|---:|---:|\n${rows || "| No signatures found | 0 | 0% |"}\n\nBeyond signatures (experimental): ${r.beyond?.likely ? `likely ${likelyValue(r)} AI-involved` : `no estimate, because ${noEstimateReason(r.beyond?.reason)}`}.\n\nThe headline counts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)\n`,
     );
   }
 
@@ -60,7 +62,7 @@ async function run() {
     git(["config", "user.name", "github-actions[bot]"]);
     git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
     // Only the generated files are staged and committed, even if an earlier step staged something else.
-    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "report.json"].map((f) => join(dir, f));
+    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "badge-likely.svg", "report.json"].map((f) => join(dir, f));
     git(["add", "--", ...files]);
     try {
       execFileSync("git", ["diff", "--cached", "--quiet", "--", ...files]);

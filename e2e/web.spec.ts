@@ -136,3 +136,15 @@ test("shows the experimental section and refuses to estimate without evidence", 
   await expect(page.locator(".beyond")).toContainText("No estimate");
   await expect(page.locator(".beyond")).toContainText("disclosed: certain");
 });
+
+test("the method link of the experimental section lands on its explanation (review 3)", async ({ page }) => {
+  await page.goto("r/demo/beta/");
+  await page.locator(".beyond a", { hasText: "How it is made" }).click();
+  await expect(page).toHaveURL(/\/howmuchai\/method\/#beyond$/);
+  await expect(page.locator("#beyond")).toBeInViewport();
+});
+
+test("opening the method page with a fragment scrolls to it", async ({ page }) => {
+  await page.goto("method/#beyond");
+  await expect(page.locator("#beyond")).toBeInViewport();
+});
