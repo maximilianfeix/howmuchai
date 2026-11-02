@@ -6,13 +6,14 @@ permissions:
   contents: write
   issues: write
   actions: write
+concurrency:
+  # Same group as the crawl in site.yml: one writer of the data branch at a time.
+  group: data
+  cancel-in-progress: false
 jobs:
   track:
     if: contains(github.event.issue.labels.*.name, 'track-request')
     runs-on: ubuntu-latest
-    concurrency:
-      group: data
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -27,20 +28,30 @@ jobs:
       - name: Add and measure
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_BODY: ${{ github.event.issue.body }}
-          REPOSITORY: ${{ github.repository }}
+          ANSWER_FILE: ${{ runner.temp }}/answer.json
         run: npx tsx scripts/track.ts --data .data
-      - name: Save data and redeploy
-        working-directory: .data
+      - name: Save data
+        run: scripts/push-data.sh .data "track: issue #${{ github.event.issue.number }}"
+      - name: Answer and close (only after the data is saved)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANSWER_FILE: ${{ runner.temp }}/answer.json
+          ISSUE: ${{ github.event.issue.number }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -q -m "track: issue #${{ github.event.issue.number }}"
-            git pull -q --rebase && git push -q
-            gh workflow run site.yml --repo "${{ github.repository }}"
-          fi
+          jq -r .body "$ANSWER_FILE" > "$RUNNER_TEMP/body.md"
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "$(jq -r .reason "$ANSWER_FILE")"
+          if [ "$(jq -r .changed "$ANSWER_FILE")" = "true" ]; then gh workflow run site.yml --repo "$GITHUB_REPOSITORY"; fi
+      - name: Tell the requester on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Sorry, something went wrong while adding this repository. The maintainer has been notified and will retry."
+      - name: Alert on failure
+        if: failure()
+        uses: ./.github/actions/alert
+        with:
+          title: "Track requests are failing"
+          details: "A track request could not be processed."
