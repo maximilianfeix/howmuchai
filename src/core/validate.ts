@@ -80,7 +80,7 @@ function checkBeyond(b: unknown, errors: string[]) {
     if (isObj(e) && (!["disclosed", "setup"].includes(e.gate as string) || !isCount(e.tooShort))) errors.push("beyond.estimate fields are invalid");
   }
   if (b.likely !== null) checkRange(b.likely, "beyond.likely", errors);
-  if (b.reason !== undefined && b.reason !== null && !["no-commits", "no-evidence", "all-disclosed", "too-few-judgeable", "inseparable"].includes(b.reason as string)) errors.push("beyond.reason is unknown");
+  if (b.reason !== undefined && b.reason !== null && !["no-commits", "no-evidence", "setup-only", "too-few-disclosed", "too-little-history", "all-disclosed", "too-few-judgeable", "inseparable", "too-uncertain"].includes(b.reason as string)) errors.push("beyond.reason is unknown");
 }
 
 export function validateReport(v: unknown): Checked<Report> {
