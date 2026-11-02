@@ -1,0 +1,16 @@
+name: Track a repository
+description: Add a public repository to the daily measurements and get a live badge and card.
+title: "Track a repository"
+labels: [track-request]
+body:
+  - type: markdown
+    attributes:
+      value: A bot reads the repository, adds it to the daily measurements and answers with the badge code within a few minutes.
+  - type: input
+    id: repo
+    attributes:
+      label: Repository
+      description: owner/repo or a github.com URL
+      placeholder: vercel/next.js
+    validations:
+      required: true

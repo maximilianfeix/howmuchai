@@ -1,0 +1,505 @@
+import "./style.css";
+import { analyzeRepo, DEFAULTS, parseRepo } from "../../src/core/analyze";
+import { badgePath, cardPath, pagePath, reportPath, type Board, type BoardEntry } from "../../src/core/dataset";
+import { escapeXml as esc, formatShare } from "../../src/core/format";
+import { GitHubClient, GitHubError } from "../../src/core/github";
+import { agentColor, agentName, registry } from "../../src/core/registry";
+import { periodLabel, renderCard } from "../../src/core/render";
+import type { Report, Section } from "../../src/core/types";
+
+const BASE = import.meta.env.BASE_URL; // "/howmuchai/" or "/"
+const SITE = __SITE__; // absolute site URL without trailing slash
+const main = document.getElementById("main")!;
+const TOKEN_KEY = "howmuchai.token";
+const EXAMPLES = ["microsoft/vscode", "oven-sh/bun", "vercel/next.js", "astral-sh/uv", "anthropics/claude-code", "torvalds/linux"];
+
+// ---------- helpers ----------
+
+const url = (path: string) => `${BASE}${path}`;
+const abs = (path: string) => `${SITE}/${path}`;
+
+function html(strings: TemplateStringsArray, ...values: unknown[]): string {
+  return strings.reduce((out, s, i) => out + s + (i < values.length ? String(values[i] ?? "") : ""), "");
+}
+
+function toast(msg: string) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.setAttribute("role", "status");
+  t.textContent = msg;
+  document.body.append(t);
+  setTimeout(() => t.remove(), 2200);
+}
+
+async function copy(text: string, what: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`${what} copied`);
+  } catch {
+    toast("Copy failed. Select the text and copy it by hand.");
+  }
+}
+
+function ago(iso: string): string {
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (mins < 2) return "just now";
+  if (mins < 90) return `${mins} min ago`;
+  const h = Math.round(mins / 60);
+  if (h < 36) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+function setTitle(t: string) {
+  document.title = t ? `${t} · howmuchai` : "howmuchai — How much of this repo was built with AI?";
+}
+
+function sortedAgents(byAgent: Record<string, number>): [string, number][] {
+  return Object.entries(byAgent).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function barHtml(byAgent: Record<string, number>, total: number, cls = ""): string {
+  if (total === 0) return `<div class="bar ${cls}" aria-hidden="true"></div>`;
+  const segs = sortedAgents(byAgent)
+    .map(([id, n]) => `<span style="width:${((100 * n) / total).toFixed(3)}%;background:${agentColor(id)}" title="${esc(agentName(id))}: ${n}"></span>`)
+    .join("");
+  return `<div class="bar ${cls}" aria-hidden="true">${segs}</div>`;
+}
+
+function legendHtml(sec: Section, unit: string): string {
+  const items = sortedAgents(sec.byAgent).map(
+    ([id, n]) => `<li><span class="sw" style="background:${agentColor(id)}"></span>${esc(agentName(id))} <span class="n">${n} · ${formatShare(n, sec.total)}</span></li>`,
+  );
+  items.push(`<li><span class="sw" style="background:var(--none)"></span>No signature found <span class="n">${sec.total - sec.ai} · ${formatShare(sec.total - sec.ai, sec.total)}</span></li>`);
+  return `<ul class="legend" aria-label="${esc(unit)} by agent">${items.join("")}</ul>`;
+}
+
+// ---------- data ----------
+
+let boardCache: Promise<Board | null> | null = null;
+function loadBoard(): Promise<Board | null> {
+  boardCache ??= fetch(url("data/leaderboard.json"))
+    .then((r) => (r.ok ? (r.json() as Promise<Board>) : null))
+    .catch(() => null);
+  return boardCache;
+}
+
+async function loadStored(fullName: string): Promise<Report | null> {
+  try {
+    const r = await fetch(url(reportPath(fullName)));
+    if (!r.ok) return null;
+    return (await r.json()) as Report;
+  } catch {
+    return null;
+  }
+}
+
+// ---------- routing ----------
+
+type Route = { name: "home" } | { name: "leaderboard" } | { name: "method" } | { name: "repo"; repo: string; live: boolean };
+
+function route(): Route {
+  const params = new URLSearchParams(location.search);
+  const q = params.get("r");
+  if (q && parseRepo(q)) return { name: "repo", repo: parseRepo(q)!, live: params.has("live") };
+  let path = location.pathname.startsWith(BASE) ? location.pathname.slice(BASE.length) : location.pathname.replace(/^\//, "");
+  path = decodeURIComponent(path).replace(/index\.html$/, "");
+  if (path.startsWith("leaderboard")) return { name: "leaderboard" };
+  if (path.startsWith("method")) return { name: "method" };
+  const m = /^r\/([^/]+)\/([^/]+)/.exec(path);
+  if (m && parseRepo(`${m[1]}/${m[2]}`)) return { name: "repo", repo: parseRepo(`${m[1]}/${m[2]}`)!, live: params.has("live") };
+  return { name: "home" };
+}
+
+function go(path: string) {
+  history.pushState(null, "", url(path));
+  render();
+  window.scrollTo(0, 0);
+}
+
+document.addEventListener("click", (e) => {
+  const a = (e.target as Element).closest("a");
+  if (!a || a.target === "_blank" || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+  const href = a.getAttribute("href");
+  if (!href || !a.hasAttribute("data-path")) return;
+  e.preventDefault();
+  go(a.getAttribute("data-path")!);
+});
+window.addEventListener("popstate", render);
+
+function fixNav(r: Route) {
+  document.querySelectorAll<HTMLAnchorElement>("[data-path]").forEach((a) => {
+    const p = a.getAttribute("data-path")!;
+    a.href = url(p);
+  });
+  document.querySelectorAll<HTMLAnchorElement>(".top nav a[data-path]").forEach((a) => {
+    const active = (r.name === "leaderboard" && a.dataset.path === "leaderboard/") || (r.name === "method" && a.dataset.path === "method/");
+    if (active) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+}
+
+let firstRender = true;
+function render() {
+  const r = route();
+  fixNav(r);
+  if (r.name === "home") renderHome();
+  else if (r.name === "leaderboard") void renderLeaderboard();
+  else if (r.name === "method") renderMethod();
+  else void renderRepo(r.repo, r.live);
+  fixNav(r);
+  if (!firstRender) main.focus({ preventScroll: true });
+  firstRender = false;
+}
+
+// ---------- views ----------
+
+function searchForm(value = ""): string {
+  return html`<form class="search" id="search" role="search">
+    <label for="q" class="skip">GitHub repository</label>
+    <input id="q" name="q" autocomplete="off" spellcheck="false" placeholder="owner/repo or a GitHub URL" value="${esc(value)}" required />
+    <button class="btn" type="submit">Measure</button>
+  </form>`;
+}
+
+function bindSearch() {
+  const f = document.getElementById("search") as HTMLFormElement | null;
+  f?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = (f.elements.namedItem("q") as HTMLInputElement).value;
+    const repo = parseRepo(v);
+    if (!repo) {
+      toast("Use owner/repo, e.g. vercel/next.js");
+      return;
+    }
+    go(pagePath(repo));
+  });
+}
+
+function renderHome() {
+  setTitle("");
+  main.innerHTML = html`
+    <section class="hero">
+      <h1>How much of this repo was built with AI?</h1>
+      <p class="lead">Paste any public GitHub repository. howmuchai reads its recent commits and pull requests and counts the ones that carry an AI coding-agent signature: Claude Code, Copilot, Codex, Cursor, Devin, Jules and more.</p>
+      ${searchForm()}
+      <div class="examples" id="examples">Try: ${EXAMPLES.map((e) => `<a class="chip" href="${url(pagePath(e))}" data-path="${pagePath(e)}">${esc(e)}</a>`).join("")}</div>
+    </section>
+    <h2 class="section-title">Most AI-signed among the 1,000 most-starred active repos</h2>
+    <div id="home-board" class="loading">Loading leaderboard</div>
+    <h2 class="section-title">How it works</h2>
+    <div class="steps">
+      <div class="card"><h3>1 · Read the history</h3><p>The last ${DEFAULTS.days} days of the default branch, up to ${DEFAULTS.maxCommits} commits and ${DEFAULTS.maxPulls} pull requests, straight from the GitHub API.</p></div>
+      <div class="card"><h3>2 · Look for signatures</h3><p>Co-author trailers, bot accounts, footers and branch names that agents leave by default. Every match links to its commit.</p></div>
+      <div class="card"><h3>3 · Count, don't guess</h3><p>No AI detector, no model. A commit counts only if it says so. That makes the number a lower bound.</p></div>
+    </div>
+    <h2 class="section-title">In your terminal</h2>
+    <pre class="cmd">npx github:maximilianfeix/howmuchai vercel/next.js</pre>
+  `;
+  bindSearch();
+  void loadBoard().then((b) => {
+    const el = document.getElementById("home-board");
+    if (!el) return;
+    if (!b || b.repos.length === 0) {
+      el.className = "muted";
+      el.textContent = "The leaderboard is being built. Check back soon.";
+      return;
+    }
+    el.className = "";
+    const top = [...b.repos].filter((e) => e.total >= 30 && e.share !== null).sort((a, b2) => (b2.share ?? 0) - (a.share ?? 0)).slice(0, 8);
+    el.innerHTML = boardTable(top, 1) + `<p><a href="${url("leaderboard/")}" data-path="leaderboard/">See all ${b.repos.length.toLocaleString("en-US")} repos →</a></p>`;
+  });
+}
+
+function boardTable(rows: BoardEntry[], start: number): string {
+  return html`<table class="lb">
+    <thead><tr><th class="num">#</th><th>Repository</th><th class="num">AI-signed</th><th class="hide-sm">Agents</th><th class="num hide-sm">Commits</th><th class="num hide-sm">Stars</th></tr></thead>
+    <tbody>${rows
+      .map(
+        (e, i) => html`<tr>
+        <td class="num muted">${start + i}</td>
+        <td class="repo"><a href="${url(pagePath(e.fullName))}" data-path="${pagePath(e.fullName)}">${esc(e.fullName)}</a></td>
+        <td class="num">${formatShare(e.ai, e.total)}</td>
+        <td class="mini hide-sm">${barHtml(e.byAgent, e.total, "small")}</td>
+        <td class="num hide-sm muted">${e.total.toLocaleString("en-US")}</td>
+        <td class="num hide-sm muted">${e.stars.toLocaleString("en-US")}</td>
+      </tr>`,
+      )
+      .join("")}</tbody></table>`;
+}
+
+async function renderRepo(repo: string, forceLive: boolean) {
+  setTitle(repo);
+  main.innerHTML = `<div class="loading" role="status">Reading ${esc(repo)}</div>`;
+  let report: Report | null = null;
+  let source: "stored" | "live" = "stored";
+  if (!forceLive) report = await loadStored(repo);
+  if (!report) {
+    source = "live";
+    const token = localStorage.getItem(TOKEN_KEY);
+    const client = new GitHubClient({ token });
+    try {
+      report = await analyzeRepo(repo, { client });
+    } catch (e) {
+      renderError(repo, e);
+      return;
+    }
+  }
+  if (route().name !== "repo") return; // user navigated away
+  renderReport(report, source);
+}
+
+function renderError(repo: string, e: unknown) {
+  let msg: string;
+  if (e instanceof GitHubError && e.resetAt) {
+    const mins = Math.max(1, Math.ceil((e.resetAt * 1000 - Date.now()) / 60000));
+    msg = `GitHub allows 60 API requests per hour without a token, and this network has used them up. Try again in ${mins} min, or add a token below. A lookup needs about 10 requests.`;
+  } else if (e instanceof GitHubError && e.status === 404) {
+    msg = `${repo} was not found. It may be private, renamed or misspelled.`;
+  } else if (e instanceof GitHubError && e.status === 409) {
+    msg = `${repo} is empty.`;
+  } else {
+    msg = `Could not read ${repo}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  main.innerHTML = html`
+    <div class="error" role="alert">${esc(msg)}</div>
+    ${searchForm(repo)}
+    ${tokenBox()}`;
+  bindSearch();
+  bindToken();
+}
+
+function tokenBox(): string {
+  const has = !!localStorage.getItem(TOKEN_KEY);
+  return html`<details class="card" style="margin-top:22px">
+    <summary>${has ? "A GitHub token is saved in this browser" : "Use a GitHub token (optional)"}</summary>
+    <p style="margin-top:10px">A token raises the limit from 60 to 5,000 requests per hour. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> with no permissions (public repositories only). It stays in this browser's local storage and is only sent to api.github.com.</p>
+    <div class="search" style="margin-top:12px"><input id="tok" type="password" placeholder="github_pat_…" autocomplete="off" /><button class="btn ghost" id="tok-save" type="button">Save</button>${has ? `<button class="btn ghost" id="tok-del" type="button">Remove</button>` : ""}</div>
+  </details>`;
+}
+
+function bindToken() {
+  document.getElementById("tok-save")?.addEventListener("click", () => {
+    const v = (document.getElementById("tok") as HTMLInputElement).value.trim();
+    if (!v) return;
+    localStorage.setItem(TOKEN_KEY, v);
+    toast("Token saved in this browser");
+    render();
+  });
+  document.getElementById("tok-del")?.addEventListener("click", () => {
+    localStorage.removeItem(TOKEN_KEY);
+    toast("Token removed");
+    render();
+  });
+}
+
+function trendHtml(sec: Section): string {
+  if (sec.byMonth.length < 2) return "";
+  const max = Math.max(...sec.byMonth.map((m) => m.total));
+  const cols = sec.byMonth
+    .map((m) => {
+      const h = max ? (100 * m.total) / max : 0;
+      const parts = sortedAgents(m.byAgent)
+        .map(([id, n]) => `<span style="height:${m.total ? (100 * n) / m.total : 0}%;background:${agentColor(id)}"></span>`)
+        .join("");
+      return `<div class="col" title="${m.month}: ${m.ai} of ${m.total} AI-signed"><div class="well"><div class="stack" style="height:${h}%">${parts}</div></div><div class="lbl">${m.month.slice(5)}/${m.month.slice(2, 4)}</div></div>`;
+    })
+    .join("");
+  return `<div class="card"><h3>By month</h3><p>AI-signed commits (color) in all commits (height).</p><div class="trend" aria-hidden="true">${cols}</div></div>`;
+}
+
+function renderReport(r: Report, source: "stored" | "live") {
+  const c = r.commits;
+  const p = r.pulls;
+  const share = formatShare(c.ai, c.total);
+  const repoPage = abs(pagePath(r.repo.fullName));
+  setTitle(`${r.repo.fullName}: ${share} AI-signed`);
+  const tracked = source === "stored";
+  const badgeMd = `[![AI-signed commits](${abs(badgePath(r.repo.fullName))})](${repoPage})`;
+  const cardMd = `[![howmuchai card for ${r.repo.fullName}](${abs(cardPath(r.repo.fullName, "dark"))})](${repoPage})`;
+  const topAgent = sortedAgents(c.byAgent)[0];
+  const tweet =
+    c.total === 0
+      ? `${r.repo.fullName} had no commits in the last ${r.window.days} days.`
+      : `${share} of recent commits in ${r.repo.fullName} carry an AI coding-agent signature${topAgent ? ` (mostly ${agentName(topAgent[0])})` : ""}.`;
+  const evidence = [...c.evidence, ...p.evidence];
+
+  main.innerHTML = html`
+    <div class="result-head">
+      <h1><a href="${esc(r.repo.url)}">${esc(r.repo.fullName)}</a></h1>
+      <div class="result-meta">★ ${r.repo.stars.toLocaleString("en-US")}${r.repo.language ? ` · ${esc(r.repo.language)}` : ""} · measured ${ago(r.generatedAt)}${
+        source === "stored" ? ` · <a href="?r=${encodeURIComponent(r.repo.fullName)}&live">measure live</a>` : ""
+      }</div>
+    </div>
+    ${r.repo.description ? `<p class="desc">${esc(r.repo.description)}</p>` : ""}
+    <div class="headline">
+      <div class="big">${share}</div>
+      <div><p class="what">of recent commits carry an AI agent signature</p>
+      <p class="period">${esc(periodLabel(r))} on <code>${esc(r.repo.defaultBranch)}</code> · ${c.ai.toLocaleString("en-US")} signed · merges and dependency bots left out</p></div>
+    </div>
+    ${barHtml(c.byAgent, c.total)}
+    ${legendHtml(c, "Commits")}
+    <div class="grid2">
+      <div class="card">
+        <h3>Pull requests</h3>
+        <p>${p.total === 0 ? "No pull requests opened in this period." : `Opened in this period that carry an agent signature (bot author, footer or agent branch).`}</p>
+        ${p.total > 0 ? `<div class="stat">${formatShare(p.ai, p.total)} <span class="muted" style="font-size:15px;font-weight:400">${p.ai} of ${p.total}</span></div>${barHtml(p.byAgent, p.total, "small")}${legendHtml(p, "Pull requests")}` : ""}
+      </div>
+      ${trendHtml(c)}
+    </div>
+    <div class="share">
+      <a class="btn" target="_blank" rel="noopener" href="https://x.com/intent/post?text=${encodeURIComponent(tweet)}&url=${encodeURIComponent(repoPage)}">Share on X</a>
+      <button class="btn ghost" id="copy-link" type="button">Copy link</button>
+      <button class="btn ghost" id="dl-card" type="button">Download card (SVG)</button>
+    </div>
+    <details class="card"><summary>Put the badge or card in your README</summary>
+      ${
+        tracked
+          ? `<div class="embed"><p>Badge: <img alt="AI-signed badge" src="${url(badgePath(r.repo.fullName))}" style="vertical-align:middle"></p><textarea rows="2" readonly>${esc(badgeMd)}</textarea>
+             <p>Card:</p><img alt="howmuchai card" src="${url(cardPath(r.repo.fullName, "dark"))}" width="495" style="max-width:100%"><textarea rows="2" readonly>${esc(cardMd)}</textarea>
+             <p class="muted">Updated about once a day.</p></div>`
+          : `<p>This repository is not tracked yet, so there is no live badge. <a href="https://github.com/maximilianfeix/howmuchai/issues/new?template=track-repo.yml&repo=${encodeURIComponent(r.repo.fullName)}&title=${encodeURIComponent(`Track ${r.repo.fullName}`)}">Ask to track it</a> (a bot adds it and answers with the badge code), or run the <a href="https://github.com/maximilianfeix/howmuchai#github-action">GitHub Action</a> in your own repo.</p>`
+      }
+    </details>
+    <div class="note">howmuchai counts what is <strong>disclosed</strong>: co-author trailers, agent bot accounts, default footers and branch names. People can remove these, so a low number is not proof of little AI use, and "no signature found" does not mean human-only. <a href="${url("method/")}" data-path="method/">How it works</a></div>
+    <details class="card" ${evidence.length ? "" : "hidden"}><summary>Evidence (${evidence.length} newest matches)</summary>
+      <ul class="evidence">${evidence
+        .map(
+          (e) => html`<li><a class="ref" href="${esc(e.url)}">${esc(e.ref)}</a><span>${esc(e.title)}</span><span class="sig"><span style="color:${agentColor(e.agentId)}">■</span> ${esc(agentName(e.agentId))} · ${esc(e.kind)} · ${esc(e.matched)}</span></li>`,
+        )
+        .join("")}</ul>
+    </details>
+    <h2 class="section-title">Measure another repo</h2>
+    ${searchForm()}
+    ${source === "live" ? tokenBox() : ""}
+  `;
+  bindSearch();
+  bindToken();
+  document.getElementById("copy-link")?.addEventListener("click", () => void copy(repoPage, "Link"));
+  document.getElementById("dl-card")?.addEventListener("click", () => {
+    const blob = new Blob([renderCard(r, "dark")], { type: "image/svg+xml" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `howmuchai-${r.repo.fullName.replace("/", "-")}.svg`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  main.querySelectorAll("textarea").forEach((t) => t.addEventListener("focus", () => t.select()));
+}
+
+// ---------- leaderboard ----------
+
+async function renderLeaderboard() {
+  setTitle("Leaderboard");
+  main.innerHTML = `<div class="loading" role="status">Loading leaderboard</div>`;
+  const b = await loadBoard();
+  if (!b || b.repos.length === 0) {
+    main.innerHTML = `<h1>Leaderboard</h1><p class="muted">The first crawl is still running. Check back soon.</p>`;
+    return;
+  }
+  const measured = b.repos.filter((e) => e.total > 0);
+  const withAi = measured.filter((e) => e.ai > 0);
+  const totalCommits = measured.reduce((s, e) => s + e.total, 0);
+  const aiCommits = measured.reduce((s, e) => s + e.ai, 0);
+  const agentRepos: Record<string, number> = {};
+  for (const e of measured) for (const id of Object.keys(e.byAgent)) agentRepos[id] = (agentRepos[id] ?? 0) + 1;
+  const shares = measured.map((e) => (e.share ?? 0)).sort((a, z) => a - z);
+  const median = shares.length ? shares[Math.floor(shares.length / 2)]! : 0;
+
+  main.innerHTML = html`
+    <div class="prose"><h1>The AI share of popular open source</h1>
+    <p class="muted">The ${b.repos.length.toLocaleString("en-US")} most-starred GitHub repositories with a push in the last 30 days, measured over the last ${b.days} days (up to ${DEFAULTS.maxCommits} commits each). Updated continuously; this snapshot ${ago(b.generatedAt)}.</p></div>
+    <div class="lb-stats">
+      <div class="card"><div class="stat">${formatShare(withAi.length, measured.length)}</div><p>of active repos have at least one AI-signed commit (${withAi.length} of ${measured.length})</p></div>
+      <div class="card"><div class="stat">${formatShare(aiCommits, totalCommits)}</div><p>of all ${totalCommits.toLocaleString("en-US")} commits read carry an agent signature</p></div>
+      <div class="card"><div class="stat">${(median * 100).toFixed(1)}%</div><p>median share per repo</p></div>
+      <div class="card"><p style="margin-bottom:6px">Repos per agent</p>${sortedAgents(agentRepos)
+        .slice(0, 5)
+        .map(([id, n]) => `<div style="display:flex;justify-content:space-between;font-size:14px"><span><span class="sw" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${agentColor(id)}"></span> ${esc(agentName(id))}</span><span class="mono">${n}</span></div>`)
+        .join("")}</div>
+    </div>
+    <div class="lb-controls">
+      <input id="lb-q" placeholder="Filter repos" aria-label="Filter repositories" />
+      <div class="seg" role="group" aria-label="Sort">
+        <button type="button" data-sort="share" aria-pressed="true">Most AI-signed</button>
+        <button type="button" data-sort="stars" aria-pressed="false">Most stars</button>
+        <button type="button" data-sort="ai" aria-pressed="false">Most signed commits</button>
+      </div>
+      <select id="lb-agent" aria-label="Agent" class="chip" style="padding:8px 10px">
+        <option value="">All agents</option>
+        ${registry.agents.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
+      </select>
+      <a class="muted" style="margin-left:auto;font-size:14px" href="${url("data/leaderboard.json")}">Download JSON</a>
+    </div>
+    <div id="lb-table"></div>
+    <p class="muted" style="font-size:14px">Repos with fewer than 10 commits in the window are listed last. Ask to <a href="https://github.com/maximilianfeix/howmuchai/issues/new?template=track-repo.yml">track another repo</a>.</p>
+  `;
+  let sort = "share";
+  const draw = () => {
+    const q = (document.getElementById("lb-q") as HTMLInputElement).value.trim().toLowerCase();
+    const agent = (document.getElementById("lb-agent") as HTMLSelectElement).value;
+    let rows = b.repos.filter((e) => (!q || e.fullName.toLowerCase().includes(q)) && (!agent || (e.byAgent[agent] ?? 0) > 0));
+    const key = (e: BoardEntry) => (sort === "stars" ? e.stars : sort === "ai" ? e.ai : e.total < 10 ? -1 : (e.share ?? -1));
+    rows = rows.sort((a, z) => key(z) - key(a) || z.stars - a.stars);
+    const el = document.getElementById("lb-table")!;
+    el.innerHTML = rows.length ? boardTable(rows.slice(0, 300), 1) + (rows.length > 300 ? `<p class="muted">Showing 300 of ${rows.length}. Use the filter.</p>` : "") : `<p class="muted">No repos match.</p>`;
+  };
+  main.querySelectorAll<HTMLButtonElement>("[data-sort]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      sort = btn.dataset.sort!;
+      main.querySelectorAll("[data-sort]").forEach((x) => x.setAttribute("aria-pressed", String(x === btn)));
+      draw();
+    }),
+  );
+  document.getElementById("lb-q")!.addEventListener("input", draw);
+  document.getElementById("lb-agent")!.addEventListener("change", draw);
+  draw();
+}
+
+// ---------- method ----------
+
+const KIND_LABEL: Record<string, string> = {
+  "commit-trailer": "Commit trailer",
+  "commit-message": "Commit message",
+  "commit-author": "Commit author",
+  "pr-author": "PR author",
+  "pr-body": "PR description",
+  "pr-branch": "PR branch",
+};
+
+function renderMethod() {
+  setTitle("Method");
+  main.innerHTML = html`<div class="prose">
+    <h1>How howmuchai measures</h1>
+    <p>howmuchai does not guess. It counts commits and pull requests that <strong>say</strong> an AI coding agent was involved, using the marks that agents leave by default. Every match links to the commit or pull request that contains it.</p>
+    <h2>What is read</h2>
+    <ul>
+      <li>Commits on the default branch from the last ${DEFAULTS.days} days, newest first, up to ${DEFAULTS.maxCommits}. Busy repos reach that cap within days; the result then says "since &lt;date&gt;".</li>
+      <li>Pull requests opened in the same period, up to ${DEFAULTS.maxPulls}.</li>
+      <li>Merge commits and dependency bots (Dependabot, Renovate, GitHub Actions and others) are left out of both counts.</li>
+      <li>Each commit or pull request counts once. If it carries signatures of two agents, it is attributed to the first in the table below.</li>
+    </ul>
+    <h2>Why the number is a lower bound</h2>
+    <ul>
+      <li>Most agents can be told not to add their signature, and many people turn it off.</li>
+      <li>Squash merges can drop trailers, and code pasted from a chat window leaves no mark.</li>
+      <li>A signature says an agent was involved, not how many lines it wrote. A one-line fix and a full rewrite count the same.</li>
+      <li>Some signals are only hints (marked "medium"), for example default branch names like <code>codex/</code>, which a person can also choose.</li>
+    </ul>
+    <p>So: a high number means a lot of disclosed AI involvement. A low number does not mean little AI use. "No signature found" never means human-only.</p>
+    <h2>Signatures</h2>
+    <p>Kept in <a href="https://github.com/maximilianfeix/howmuchai/blob/main/signatures/agents.json">signatures/agents.json</a>. Missing an agent or found a false match? <a href="https://github.com/maximilianfeix/howmuchai/issues/new/choose">Open an issue</a>.</p>
+  </div>
+  <table class="agents-table">
+    <thead><tr><th>Agent</th><th>Where</th><th>Pattern (case-insensitive)</th><th>Confidence</th></tr></thead>
+    <tbody>${registry.agents
+      .flatMap((a) =>
+        a.signals.map(
+          (s, i) => html`<tr>${i === 0 ? `<td rowspan="${a.signals.length}"><span class="sw" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${a.color}"></span> ${esc(a.name)}</td>` : ""}<td>${KIND_LABEL[s.kind] ?? s.kind}</td><td><code>${esc(s.pattern)}</code>${s.note ? `<br><span class="muted">${esc(s.note)}</span>` : ""}</td><td>${s.confidence}</td></tr>`,
+        ),
+      )
+      .join("")}</tbody>
+  </table>
+  <div class="prose"><h2>Privacy</h2><p>Lookups run in your browser against the public GitHub API. There is no server, no tracking and no analytics. A token you save stays in your browser.</p></div>`;
+}
+
+render();

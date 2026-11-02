@@ -1,0 +1,11 @@
+node_modules/
+dist/site/
+.DS_Store
+*.log
+.work/
+.data/
+brand/brief.txt
+brand/*.png
+!brand/social-preview.png
+.playwright-mcp/
+research/

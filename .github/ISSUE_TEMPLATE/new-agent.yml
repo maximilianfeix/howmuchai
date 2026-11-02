@@ -1,0 +1,25 @@
+name: Add an agent or signature
+description: Teach howmuchai a coding agent or a signature it does not know yet.
+labels: [signature]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      placeholder: e.g. Gemini CLI
+    validations:
+      required: true
+  - type: textarea
+    id: signature
+    attributes:
+      label: Signature
+      description: The exact trailer, author, bot account, footer or branch prefix the agent leaves, ideally with a link to the vendor docs.
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example commits or pull requests
+      description: Two or three public links.
+    validations:
+      required: true

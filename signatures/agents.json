@@ -1,0 +1,299 @@
+{
+  "version": 2,
+  "ignoredAuthors": [
+    "dependabot[bot]",
+    "dependabot-preview[bot]",
+    "renovate[bot]",
+    "renovate-bot",
+    "github-actions[bot]",
+    "pre-commit-ci[bot]",
+    "allcontributors[bot]",
+    "imgbot[bot]",
+    "snyk-bot",
+    "greenkeeper[bot]",
+    "mergify[bot]",
+    "release-please[bot]",
+    "changeset-bot[bot]"
+  ],
+  "agents": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "color": "#8D9DFF",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*claude\\b[^<\\n]*<noreply@anthropic\\.com>",
+          "confidence": "high",
+          "note": "Added by Claude Code; the name carries the model, e.g. \"Claude Opus 5.5 (1M context)\""
+        },
+        {
+          "kind": "commit-message",
+          "pattern": "generated (with|by) \\[?claude code\\]?",
+          "confidence": "high",
+          "note": "Default footer \"🤖 Generated with Claude Code\""
+        },
+        {
+          "kind": "commit-author",
+          "pattern": "^claude\\[bot\\]$|^noreply@anthropic\\.com$",
+          "confidence": "high",
+          "note": "Claude GitHub app and Claude Code on the web (account @claude, owned by Anthropic)"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^claude(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-body",
+          "pattern": "generated (with|by) \\[?claude code\\]?",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-branch",
+          "pattern": "^claude/",
+          "confidence": "medium",
+          "note": "Default branch prefix of Claude Code on the web and the Claude GitHub app"
+        }
+      ]
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot",
+      "color": "#4DB8A4",
+      "signals": [
+        {
+          "kind": "commit-author",
+          "pattern": "^copilot(-swe-agent)?(\\[bot\\])?$",
+          "confidence": "high",
+          "note": "Copilot coding agent"
+        },
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*copilot\\b[^\\n]*<[^>]*copilot@users\\.noreply\\.github\\.com>",
+          "confidence": "high",
+          "note": "Added by Copilot in VS Code and on github.com when AI-generated changes are committed"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^(app/)?copilot(-swe-agent)?(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-branch",
+          "pattern": "^copilot/",
+          "confidence": "medium",
+          "note": "Default branch prefix of the Copilot coding agent"
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "OpenAI Codex",
+      "color": "#E6B75A",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*\\bcodex\\b[^<\\n]*<[^>\\n]*>",
+          "confidence": "high",
+          "note": "Codex CLI, e.g. \"gpt-6-astra (Codex) <agent@example.invalid>\""
+        },
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<noreply@openai\\.com>",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^chatgpt-codex-connector(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-branch",
+          "pattern": "^codex/",
+          "confidence": "medium",
+          "note": "Default branch prefix of Codex cloud tasks"
+        }
+      ]
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "color": "#D891C8",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<cursoragent@cursor\\.com>",
+          "confidence": "high",
+          "note": "\"Cursor Agent\" or \"Cursor\""
+        },
+        {
+          "kind": "commit-author",
+          "pattern": "^(cursoragent|cursor\\[bot\\])$|^cursoragent@cursor\\.com$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^cursor(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-branch",
+          "pattern": "^cursor/",
+          "confidence": "medium",
+          "note": "Default branch prefix of Cursor background agents"
+        }
+      ]
+    },
+    {
+      "id": "devin",
+      "name": "Devin",
+      "color": "#62B9DB",
+      "signals": [
+        {
+          "kind": "commit-author",
+          "pattern": "^devin-ai-integration(\\[bot\\])?$|devin-ai-integration\\[bot\\]@users\\.noreply\\.github\\.com",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^devin-ai-integration(\\[bot\\])?$",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "jules",
+      "name": "Google Jules",
+      "color": "#B0BF65",
+      "signals": [
+        {
+          "kind": "commit-author",
+          "pattern": "^google-labs-jules(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^google-labs-jules(\\[bot\\])?$",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "color": "#ED9983",
+      "signals": [
+        {
+          "kind": "commit-author",
+          "pattern": "\\(aider\\)$",
+          "confidence": "high",
+          "note": "Aider appends (aider) to the author name"
+        },
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*aider\\b",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "amp",
+      "name": "Amp",
+      "color": "#B39BDC",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*amp\\s*<amp@ampcode\\.com>",
+          "confidence": "high"
+        },
+        {
+          "kind": "commit-trailer",
+          "pattern": "^amp-thread(-id)?:\\s*https://ampcode\\.com/",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "openhands",
+      "name": "OpenHands",
+      "color": "#88AFBE",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*openhands\\s*<openhands@all-hands\\.dev>",
+          "confidence": "high"
+        },
+        {
+          "kind": "commit-author",
+          "pattern": "^openhands(-agent)?(\\[bot\\])?$|openhands@all-hands\\.dev",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "capy",
+      "name": "Capy",
+      "color": "#C9A27E",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<[^>]*capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
+          "confidence": "high",
+          "note": "Capy AI GitHub app (capy.ai)"
+        },
+        {
+          "kind": "commit-author",
+          "pattern": "^capy-ai(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^capy-ai(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "pr-branch",
+          "pattern": "^capy/",
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "opencode",
+      "name": "opencode",
+      "color": "#7FC7A6",
+      "signals": [
+        {
+          "kind": "commit-author",
+          "pattern": "^opencode-agent(\\[bot\\])?$",
+          "confidence": "high",
+          "note": "OpenCode Agent GitHub app (opencode.ai)"
+        },
+        {
+          "kind": "pr-author",
+          "pattern": "^opencode-agent(\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*opencode\\b[^\\n]*<",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "junie",
+      "name": "JetBrains Junie",
+      "color": "#E58FB0",
+      "signals": [
+        {
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:\\s*junie\\b[^\\n]*<",
+          "confidence": "medium",
+          "note": "JetBrains Junie"
+        }
+      ]
+    }
+  ]
+}

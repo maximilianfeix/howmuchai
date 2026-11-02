@@ -1,0 +1,36 @@
+name: howmuchai
+description: Measure how many recent commits and pull requests carry an AI coding-agent signature, and keep a README card and badge up to date.
+author: Maximilian Feix
+branding:
+  icon: percent
+  color: blue
+inputs:
+  repository:
+    description: Repository to measure (owner/repo). Defaults to the current repository.
+    required: false
+  days:
+    description: Window in days.
+    required: false
+    default: "90"
+  output-dir:
+    description: Where card-dark.svg, card-light.svg, badge.svg and report.json are written.
+    required: false
+    default: .github/howmuchai
+  commit:
+    description: Commit and push the files ("true" or "false"). Needs `contents: write`.
+    required: false
+    default: "true"
+  token:
+    description: GitHub token used to read the repository.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  share:
+    description: Share of AI-signed commits, e.g. "23%".
+  ai-commits:
+    description: Number of AI-signed commits.
+  commits:
+    description: Number of commits counted.
+runs:
+  using: node24
+  main: action/index.mjs

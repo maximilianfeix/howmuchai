@@ -1,0 +1,26 @@
+name: Wrong result
+description: A commit or pull request was counted although no AI agent was involved, or an agent signature was missed.
+labels: [accuracy]
+body:
+  - type: input
+    id: link
+    attributes:
+      label: Commit or pull request
+      description: Link to the commit or pull request that was counted wrongly or missed.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What went wrong
+      options:
+        - Counted, but no AI agent was involved (false positive)
+        - An AI agent was involved, but it was not counted (missed signature)
+        - Counted for the wrong agent
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Anything that helps, for example which tool wrote the commit.
