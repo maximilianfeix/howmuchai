@@ -371,6 +371,7 @@ function toPull(p) {
     branch: p.head?.ref ?? "",
     createdAt: p.created_at,
     mergedAt: p.merged_at,
+    mergeCommitSha: p.merge_commit_sha ?? null,
     url: p.html_url
   };
 }
@@ -1087,7 +1088,7 @@ function score(model, message) {
 
 // src/core/analyze.ts
 var styleModel = style_model_default;
-var VERSION = "0.1.0";
+var VERSION = "0.2.0";
 var DEFAULTS = { days: 90, maxCommits: 500, maxPulls: 300, evidenceLimit: 40 };
 function parseRepo(input2) {
   const s = input2.trim().replace(/\.git$/, "").replace(/\/+$/, "");
@@ -1125,7 +1126,30 @@ function count(sec, b, matches) {
   }
   return true;
 }
-function summarizeCommits(items, cls, evidenceLimit) {
+var LINK_DAYS = 2;
+function linkedPull(c, pulls) {
+  const m = /\(#(\d{1,9})\)\s*$/.exec(c.message.split("\n", 1)[0] ?? "");
+  if (!m) return null;
+  const p = pulls.get(Number(m[1]));
+  if (!p || !p.mergedAt) return null;
+  if (p.mergeCommitSha) return p.mergeCommitSha === c.sha ? p : null;
+  const dt = Math.abs(Date.parse(c.date) - Date.parse(p.mergedAt));
+  return Number.isFinite(dt) && dt <= LINK_DAYS * 864e5 ? p : null;
+}
+function commitMatches(c, cls, pulls) {
+  const own = cls.commit(c);
+  if (own.some((m) => m.confidence === "high")) return { matches: own, viaPull: null };
+  const p = linkedPull(c, pulls);
+  if (p && !cls.isIgnoredPull(p)) {
+    const pm = cls.pull(p).filter((m) => m.confidence === "high");
+    if (pm.length) return { matches: [...pm, ...own], viaPull: p.number };
+  }
+  return { matches: own, viaPull: null };
+}
+function pullIndex(pulls) {
+  return new Map(pulls.map((p) => [p.number, p]));
+}
+function summarizeCommits(items, cls, evidenceLimit, pulls = /* @__PURE__ */ new Map()) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
   sec.fetched = items.length;
@@ -1135,9 +1159,16 @@ function summarizeCommits(items, cls, evidenceLimit) {
     if (!sec.oldest || c.date < sec.oldest) sec.oldest = c.date;
     const b = bucket(months, c.date);
     b.total++;
-    const matches = cls.commit(c);
+    const { matches, viaPull } = commitMatches(c, cls, pulls);
     if (!count(sec, b, matches)) continue;
-    if (sec.evidence.length < evidenceLimit) sec.evidence.push(toEvidence(matches[0], c.sha.slice(0, 7), firstLine(c.message), c.date, c.url));
+    if (sec.evidence.length < evidenceLimit) {
+      const e = toEvidence(matches[0], c.sha.slice(0, 7), firstLine(c.message), c.date, c.url);
+      if (viaPull !== null) {
+        e.viaPull = viaPull;
+        e.matched = `PR #${viaPull}: ${e.matched}`;
+      }
+      sec.evidence.push(e);
+    }
   }
   sec.byMonth = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
   return sec;
@@ -1186,7 +1217,8 @@ async function fetchRepoData(input2, opts = {}) {
     };
     data.setup = await optional(() => client.agentSetup(repo.fullName));
     const cls = createClassifier(registry);
-    const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && cls.commit(c).some((m) => m.confidence === "high")).length;
+    const prs = pullIndex(pulls.items);
+    const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && commitMatches(c, cls, prs).matches.some((m) => m.confidence === "high")).length;
     if (disclosed >= GATE_DISCLOSED) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
@@ -1198,7 +1230,8 @@ var MIN_JUDGEABLE = 20;
 function beyondSignatures(d, cls) {
   const items = d.commits.items.filter((c) => !cls.isIgnoredCommit(c));
   const signed = /* @__PURE__ */ new Set();
-  for (const c of items) if (cls.commit(c).some((m) => m.confidence === "high")) signed.add(c);
+  const prs = pullIndex(d.pulls.items);
+  for (const c of items) if (commitMatches(c, cls, prs).matches.some((m) => m.confidence === "high")) signed.add(c);
   const loginByEmail = /* @__PURE__ */ new Map();
   for (const c of items) if (c.authorLogin && c.authorEmail) loginByEmail.set(c.authorEmail.toLowerCase(), c.authorLogin.toLowerCase());
   const who = (c) => {
@@ -1261,7 +1294,7 @@ function beyondSignatures(d, cls) {
 function buildReport(d, opts = {}) {
   const evidenceLimit = opts.evidenceLimit ?? DEFAULTS.evidenceLimit;
   const cls = createClassifier(registry);
-  const cSec = summarizeCommits(d.commits.items, cls, evidenceLimit);
+  const cSec = summarizeCommits(d.commits.items, cls, evidenceLimit, pullIndex(d.pulls.items));
   cSec.capped = d.commits.capped;
   const pSec = summarizePulls(d.pulls.items, cls, evidenceLimit);
   pSec.capped = d.pulls.capped;

@@ -110,6 +110,45 @@ It writes `.github/howmuchai/card-dark.svg`, `card-light.svg`, `badge.svg`, `bad
 ![AI-signed commits](.github/howmuchai/badge.svg)
 ```
 
+## MCP server
+
+howmuchai is also an [MCP](https://modelcontextprotocol.io) server, so Claude, Cursor, VS Code and other clients can ask it directly. It has four read-only tools:
+
+| Tool | What it does |
+|---|---|
+| `measure_repo` | AI-signed share of a repo's commits and PRs, per agent, with evidence and the experimental range. Uses the stored daily measurement when there is one, else measures live |
+| `leaderboard` | Rows of the top-1,000 leaderboard, filtered by name or agent and sorted by share, stars, signed commits or estimate |
+| `check_commit` | Runs the signature registry on one commit message offline: which signatures match and whether they count |
+| `list_signatures` | The signature registry, per agent |
+
+Claude Code:
+
+```bash
+claude mcp add howmuchai -e GITHUB_TOKEN=$(gh auth token) -- npx -y github:maximilianfeix/howmuchai mcp
+```
+
+Claude Desktop, Cursor (`~/.cursor/mcp.json`) and other clients that use the `mcpServers` format:
+
+```json
+{
+  "mcpServers": {
+    "howmuchai": {
+      "command": "npx",
+      "args": ["-y", "github:maximilianfeix/howmuchai", "mcp"],
+      "env": { "GITHUB_TOKEN": "<optional, any token without scopes>" }
+    }
+  }
+}
+```
+
+VS Code (`.vscode/mcp.json`):
+
+```json
+{ "servers": { "howmuchai": { "type": "stdio", "command": "npx", "args": ["-y", "github:maximilianfeix/howmuchai", "mcp"] } } }
+```
+
+The token is optional and only needed for live measurements of untracked repos. It is sent only to api.github.com and never appears in tool output.
+
 ## How it measures
 
 howmuchai does not guess and does not run an AI detector. It counts what is **disclosed**:
@@ -126,6 +165,7 @@ The full list with regular expressions lives in [`signatures/agents.json`](signa
 - **Window:** the last 90 days of the default branch, up to 500 commits, and up to 300 pull requests opened in that time. Busy repos reach the cap within days; the result then says "since &lt;date&gt;".
 - **Left out:** merge commits and dependency bots (Dependabot, Renovate, GitHub Actions, pre-commit.ci and others).
 - **One agent per item:** a commit with two signatures counts once, for the first matching agent.
+- **Squash merges:** a squash commit `… (#123)` without a signature of its own counts when pull request #123 carries one (for example the "Generated with Claude Code" footer). The link needs #123 to be merged and GitHub's `merge_commit_sha` to be that exact commit. In the top 1,000 this adds about 1,700 commits in 200 repos; a sample of 10 was checked against GitHub by hand and all were right.
 
 ### Why the number is a lower bound
 

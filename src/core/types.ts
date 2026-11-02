@@ -60,6 +60,8 @@ export interface PullInput {
   branch: string;
   createdAt: string;
   mergedAt: string | null;
+  /** Sha of the commit the merge created on the base branch. Missing in raw data stored before registry v6. */
+  mergeCommitSha?: string | null;
   url: string;
 }
 
@@ -85,6 +87,8 @@ export interface Evidence {
   /** Missing in reports made before registry v2. */
   confidence?: Confidence;
   signalId?: string;
+  /** Set when a commit counts because the pull request it squash-merged carries the signature. */
+  viaPull?: number;
 }
 
 export interface MonthBucket {

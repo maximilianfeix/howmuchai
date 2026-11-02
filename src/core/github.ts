@@ -344,6 +344,7 @@ interface RawPull {
   head: { ref: string };
   created_at: string;
   merged_at: string | null;
+  merge_commit_sha?: string | null;
   html_url: string;
 }
 
@@ -372,6 +373,7 @@ export function toPull(p: RawPull): PullInput {
     branch: p.head?.ref ?? "",
     createdAt: p.created_at,
     mergedAt: p.merged_at,
+    mergeCommitSha: p.merge_commit_sha ?? null,
     url: p.html_url,
   };
 }

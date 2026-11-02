@@ -1,5 +1,6 @@
 import { analyzeRepo, DEFAULTS, parseRepo, VERSION } from "../core/analyze";
 import { noEstimateReason } from "../core/format";
+import { runStdio } from "../mcp/server";
 import { GitHubClient, GitHubError } from "../core/github";
 import { agentColor, agentName } from "../core/registry";
 import { coverageLabel } from "../core/render";
@@ -11,6 +12,7 @@ that carry an AI coding-agent signature (a lower bound of disclosed AI use).
 
 Usage
   npx howmuchai <owner/repo | github url> [options]
+  npx howmuchai mcp        run as an MCP server on stdio (for Claude, Cursor, VS Code)
 
 Options
   --days <n>       window in days (default ${DEFAULTS.days})
@@ -112,6 +114,14 @@ function render(r: Report, evidence: boolean): string {
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args[0] === "mcp") {
+    if (args.length > 1) {
+      process.stderr.write(`"howmuchai mcp" takes no options; set GITHUB_TOKEN in its environment.\n`);
+      process.exit(2);
+    }
+    await runStdio({ token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null });
+    return;
+  }
   if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
     process.stdout.write(HELP);
     return;
