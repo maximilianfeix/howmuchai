@@ -944,7 +944,7 @@ var agents_default = {
         {
           id: "gemini/trailer-google",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*gemini\\b[^<\\n]*<(?:noreply|gemini)@google\\.com>",
+          pattern: "^co-authored-by:[ \\t]*gemini\\b(?![^<\\n]*\\(agy\\))[^<\\n]*<(?:noreply|gemini)@google\\.com>",
           confidence: "medium",
           note: '"Gemini <noreply@google.com>" or "Gemini 3.x Flash (agy) <noreply@google.com>": a Gemini agent, but also used by Antigravity (agy)'
         },
@@ -965,9 +965,16 @@ var agents_default = {
         {
           id: "gemini/pr-author",
           kind: "pr-author",
-          pattern: "^gemini-cli(?:\\[bot\\])?$",
+          pattern: "^gemini-cli\\[bot\\]$",
           confidence: "high",
           note: "gemini-cli[bot] (run-gemini-cli automation; mostly google-gemini/* repos)"
+        },
+        {
+          id: "gemini/pr-author-user",
+          kind: "pr-author",
+          pattern: "^gemini-cli$",
+          confidence: "medium",
+          note: "Account gemini-cli (id 218195315, no profile); also used by Google Antigravity"
         }
       ]
     },
@@ -1003,13 +1010,6 @@ var agents_default = {
           pattern: "^co-authored-by:[^<\\n]*<(?:(?:noreply|cline)@cline\\.bot|cline@users\\.noreply\\.github\\.com|(?:\\d+\\+)?cline-cloud\\[bot\\]@users\\.noreply\\.github\\.com)>",
           confidence: "high",
           note: '"Cline <noreply@cline.bot>" (also block/aittributor), Cline Cloud app'
-        },
-        {
-          id: "cline/trailer-name",
-          kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*cline(?:[ \\t]+(?:agent|bot))?(?:[ \\t]+\\([^)\\n]{1,60}\\))?[ \\t]*<[^>\\n]+>",
-          confidence: "medium",
-          note: "Cline with another address; Cline is also a surname"
         },
         {
           id: "cline/author",
@@ -1103,13 +1103,6 @@ var agents_default = {
           kind: "pr-author",
           pattern: "^(?:kilo-code-bot|kiloconnect)(?:\\[bot\\])?$",
           confidence: "high"
-        },
-        {
-          id: "kilo/pr-branch",
-          kind: "pr-branch",
-          pattern: "^kilo/[^\\s]+$",
-          confidence: "medium",
-          note: "kilo/<type>-<id>-<timestamp> (github.handler.ts:1113)"
         },
         {
           id: "kilo/footer",
@@ -1233,12 +1226,6 @@ var agents_default = {
           confidence: "high"
         },
         {
-          id: "factory/pr-branch",
-          kind: "pr-branch",
-          pattern: "^droid/[^\\s]+$",
-          confidence: "medium"
-        },
-        {
           id: "factory/pr-trailer",
           kind: "pr-body",
           pattern: "^[^\\S\\n]*co-authored-by:[^<\\n]*<(?:\\d+\\+)?factory-droid(?:\\[bot\\])?@users\\.noreply\\.github\\.com>",
@@ -1287,8 +1274,9 @@ var agents_default = {
           id: "augment/pr-session",
           kind: "pr-body",
           pattern: "https://cosmos\\.augmentcode\\.com/session\\?[^\\s)]*agentid=[A-Za-z0-9]{8,}",
-          confidence: "high",
-          contains: "cosmos.augmentcode.com/session"
+          confidence: "medium",
+          contains: "cosmos.augmentcode.com/session",
+          note: "A link to a session can also be pasted by a person, so it is a hint only."
         }
       ]
     },
@@ -1328,8 +1316,9 @@ var agents_default = {
           id: "warp/pr-run",
           kind: "pr-body",
           pattern: "https://oz\\.warp\\.dev/runs/[0-9a-f-]{16,}",
-          confidence: "high",
-          contains: "oz.warp.dev/runs/"
+          confidence: "medium",
+          contains: "oz.warp.dev/runs/",
+          note: "A link to a session can also be pasted by a person, so it is a hint only."
         },
         {
           id: "warp/pr-trailer",
@@ -1358,13 +1347,6 @@ var agents_default = {
           pattern: "^co-authored-by:[ \\t]*goose\\b[^<\\n]*<(?:(?:opensource|goose|noreply)@block\\.xyz|noreply@goose-docs\\.ai|goose@aaif\\.dev|noreply@aaif\\.org)>",
           confidence: "high",
           note: 'block/aittributor writes "Goose <opensource@block.xyz>"'
-        },
-        {
-          id: "goose/trailer-name",
-          kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*goose(?![\\w-])[^<\\n]*<[^>\\n]+>",
-          confidence: "medium",
-          note: "goose is also a nickname"
         },
         {
           id: "goose/footer",
@@ -1456,12 +1438,6 @@ var agents_default = {
           kind: "commit-trailer",
           pattern: "^co-authored-by:[ \\t]*trae(?:[ \\t]+cli)?\\b[^<\\n]*<(?:traecli|noreply)@bytedance\\.com>",
           confidence: "high"
-        },
-        {
-          id: "trae/trailer-name",
-          kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*trae(?:[ \\t]+cli)?(?![\\w-])[^<\\n]*<[^>\\n]+>",
-          confidence: "medium"
         }
       ]
     },
@@ -1480,7 +1456,7 @@ var agents_default = {
         {
           id: "cosine/author",
           kind: "commit-author",
-          pattern: "^(?:agent|genie)@cosine\\.sh$|^cosinegenie$|^cosineai\\[bot\\]$",
+          pattern: "^(?:agent|genie)@cosine\\.sh$|^cosineai\\[bot\\]$",
           confidence: "high",
           note: "CosineGenie = User account with company @CosineAI"
         },
@@ -1489,12 +1465,6 @@ var agents_default = {
           kind: "pr-author",
           pattern: "^cosineai(?:\\[bot\\])?$",
           confidence: "high"
-        },
-        {
-          id: "cosine/pr-branch",
-          kind: "pr-branch",
-          pattern: "^cosine/[^\\s]+$",
-          confidence: "medium"
         },
         {
           id: "cosine/pr-footer",
@@ -1525,7 +1495,7 @@ var agents_default = {
         {
           id: "tembo/pr-author",
           kind: "pr-author",
-          pattern: "^tembo(?:\\[bot\\])?$",
+          pattern: "^tembo\\[bot\\]$",
           confidence: "high"
         },
         {
@@ -1538,8 +1508,9 @@ var agents_default = {
           id: "tembo/pr-session",
           kind: "pr-body",
           pattern: "https://app\\.tembo\\.io/sessions/[0-9a-f-]{16,}",
-          confidence: "high",
-          contains: "app.tembo.io/sessions/"
+          confidence: "medium",
+          contains: "app.tembo.io/sessions/",
+          note: "A link to a session can also be pasted by a person, so it is a hint only."
         }
       ]
     },
@@ -1604,15 +1575,9 @@ var agents_default = {
           id: "v0/pr-session",
           kind: "pr-body",
           pattern: "\\[v0 session\\]\\(https://v0\\.(?:app|dev)/[^)\\s]*chat/[^)\\s]+\\)",
-          confidence: "high",
-          contains: "v0 session"
-        },
-        {
-          id: "v0/pr-branch",
-          kind: "pr-branch",
-          pattern: "^v0/[^\\s]+$",
           confidence: "medium",
-          note: "v0 GitHub integration; PRs opened by vercel[bot] or the user"
+          contains: "v0 session",
+          note: "A link to a session can also be pasted by a person, so it is a hint only."
         }
       ]
     },
@@ -1672,7 +1637,7 @@ var agents_default = {
         {
           id: "continue/pr-author",
           kind: "pr-author",
-          pattern: "^continue(?:\\[bot\\])?$",
+          pattern: "^continue\\[bot\\]$",
           confidence: "medium"
         }
       ]

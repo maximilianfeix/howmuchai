@@ -636,14 +636,14 @@
   },
   "gemini/trailer-google": {
     "pos": [
-      "Co-Authored-By: Gemini <noreply@google.com>",
-      "Co-Authored-By: Gemini 3.8 Flash (agy) <noreply@google.com>"
+      "Co-Authored-By: Gemini <noreply@google.com>"
     ],
     "neg": [
       "Co-authored-by: Jane Doe <jane@example.com>",
       "Signed-off-by: Alex Kim <alex@kernel.org>",
       "Reviewed-by: Sam Lee <sam@example.org>",
-      "Co-authored-by: Cursor Smith <csmith@example.com>"
+      "Co-authored-by: Cursor Smith <csmith@example.com>",
+      "Co-Authored-By: Gemini 3.8 Flash (agy) <noreply@google.com>"
     ]
   },
   "gemini/footer": {
@@ -676,10 +676,9 @@
       "gemini-cli[bot]"
     ],
     "neg": [
-      "jane-doe",
-      "dependabot[bot]",
+      "gemini-cli",
       "gemini-cli-robot",
-      "tembo-fan"
+      "jane-doe"
     ]
   },
   "windsurf/trailer": {
@@ -714,19 +713,6 @@
       "Co-authored-by: Cline <cline@users.noreply.github.com>"
     ],
     "neg": [
-      "Co-authored-by: Jane Doe <jane@example.com>",
-      "Signed-off-by: Alex Kim <alex@kernel.org>",
-      "Reviewed-by: Sam Lee <sam@example.org>",
-      "Co-authored-by: Cursor Smith <csmith@example.com>"
-    ]
-  },
-  "cline/trailer-name": {
-    "pos": [
-      "Co-authored-by: Cline <cline@localhost>",
-      "Co-authored-by: Cline Agent <cline-agent@abetworks.in>"
-    ],
-    "neg": [
-      "Co-Authored-By: Cline SR",
       "Co-authored-by: Jane Doe <jane@example.com>",
       "Signed-off-by: Alex Kim <alex@kernel.org>",
       "Reviewed-by: Sam Lee <sam@example.org>",
@@ -873,17 +859,6 @@
       "dependabot[bot]",
       "gemini-cli-robot",
       "tembo-fan"
-    ]
-  },
-  "kilo/pr-branch": {
-    "pos": [
-      "kilo/add-tests"
-    ],
-    "neg": [
-      "main",
-      "fix/cline-login",
-      "feature/kilo-units",
-      "v0.1.0"
     ]
   },
   "kilo/footer": {
@@ -1067,17 +1042,6 @@
       "tembo-fan"
     ]
   },
-  "factory/pr-branch": {
-    "pos": [
-      "droid/fix-ci"
-    ],
-    "neg": [
-      "main",
-      "fix/cline-login",
-      "feature/kilo-units",
-      "v0.1.0"
-    ]
-  },
   "factory/pr-trailer": {
     "pos": [
       "Co-authored-by: factory-droid[bot] <138933559+factory-droid[bot]@users.noreply.github.com>"
@@ -1255,18 +1219,6 @@
       "Co-authored-by: Cursor Smith <csmith@example.com>"
     ]
   },
-  "goose/trailer-name": {
-    "pos": [
-      "Co-Authored-By: Goose (timeFighter combat-dev) <team@litora-nova.com>"
-    ],
-    "neg": [
-      "Co-authored-by: goose-logic <295146002+goose-logic@users.noreply.github.com>",
-      "Co-authored-by: Jane Doe <jane@example.com>",
-      "Signed-off-by: Alex Kim <alex@kernel.org>",
-      "Reviewed-by: Sam Lee <sam@example.org>",
-      "Co-authored-by: Cursor Smith <csmith@example.com>"
-    ]
-  },
   "goose/footer": {
     "pos": [
       "🤖 Generated with [goose](https://github.com/block/goose)",
@@ -1385,18 +1337,6 @@
       "Co-authored-by: Cursor Smith <csmith@example.com>"
     ]
   },
-  "trae/trailer-name": {
-    "pos": [
-      "Co-authored-by: trae (glm-5.2) <ai@local>"
-    ],
-    "neg": [
-      "Co-authored-by: Traeger <a@b>",
-      "Co-authored-by: Jane Doe <jane@example.com>",
-      "Signed-off-by: Alex Kim <alex@kernel.org>",
-      "Reviewed-by: Sam Lee <sam@example.org>",
-      "Co-authored-by: Cursor Smith <csmith@example.com>"
-    ]
-  },
   "cosine/trailer": {
     "pos": [
       "Co-authored-by: Cosine <agent@cosine.sh>",
@@ -1412,14 +1352,14 @@
   },
   "cosine/author": {
     "pos": [
-      "genie@cosine.sh",
-      "CosineGenie"
+      "genie@cosine.sh"
     ],
     "neg": [
       "jane-doe",
       "jane@example.com",
       "dependabot[bot]",
-      "cline-fan"
+      "cline-fan",
+      "CosineGenie"
     ]
   },
   "cosine/pr-author": {
@@ -1431,17 +1371,6 @@
       "dependabot[bot]",
       "gemini-cli-robot",
       "tembo-fan"
-    ]
-  },
-  "cosine/pr-branch": {
-    "pos": [
-      "cosine/feature-x"
-    ],
-    "neg": [
-      "main",
-      "fix/cline-login",
-      "feature/kilo-units",
-      "v0.1.0"
     ]
   },
   "cosine/pr-footer": {
@@ -1487,7 +1416,8 @@
       "jane-doe",
       "dependabot[bot]",
       "gemini-cli-robot",
-      "tembo-fan"
+      "tembo-fan",
+      "tembo"
     ]
   },
   "tembo/pr-branch": {
@@ -1596,17 +1526,6 @@
       "Co-authored-by: Jane Doe <jane@example.com>"
     ]
   },
-  "v0/pr-branch": {
-    "pos": [
-      "v0/user-1234abcd"
-    ],
-    "neg": [
-      "main",
-      "fix/cline-login",
-      "feature/kilo-units",
-      "v0.1.0"
-    ]
-  },
   "replit/author": {
     "pos": [
       "replit-agent",
@@ -1684,7 +1603,8 @@
       "jane-doe",
       "dependabot[bot]",
       "gemini-cli-robot",
-      "tembo-fan"
+      "tembo-fan",
+      "continue"
     ]
   },
   "pi/trailer": {
@@ -1745,6 +1665,15 @@
       "Co-authored-by: Cursor Smith <csmith@example.com>",
       "Entire-Checkpoint: see notes",
       "Entire-Checkpoint: 12345"
+    ]
+  },
+  "gemini/pr-author-user": {
+    "pos": [
+      "gemini-cli"
+    ],
+    "neg": [
+      "gemini-cli[bot]",
+      "gemini-cli-robot"
     ]
   }
 }
