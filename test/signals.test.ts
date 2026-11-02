@@ -57,4 +57,14 @@ describe("adversarial input", () => {
     }
     expect(performance.now() - t0).toBeLessThan(1500);
   });
+
+  it("handles many mid-length trailer-shaped lines quickly", () => {
+    const line = "Co-authored-by:" + " ".repeat(240) + "(codex)".repeat(30);
+    const msg = Array.from({ length: 2000 }, () => line).join("\n");
+    const foot = Array.from({ length: 2000 }, () => "generated with " + "[".repeat(490)).join("\n");
+    const t0 = performance.now();
+    cls.commit({ ...base, message: msg + "\n" + foot });
+    cls.pull({ number: 1, title: "t", body: foot, authorLogin: "x", branch: "y", createdAt: base.date, mergedAt: null, url: "u" });
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
 });

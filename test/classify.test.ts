@@ -41,6 +41,23 @@ function pull(over: Partial<PullInput>): PullInput {
 
 const ids = (c: CommitInput) => cls.commit(c).map((m) => m.agentId);
 
+const data: RepoData = {
+  repo: { fullName: "o/r", url: "https://github.com/o/r", description: "<b>x</b> & y", stars: 10, defaultBranch: "main", language: "Go", archived: false, fork: false },
+  commits: {
+    items: [
+      commit({ sha: "1111111", message: "a\n\nCo-Authored-By: Claude <noreply@anthropic.com>", date: "2026-09-02T00:00:00Z" }),
+      commit({ sha: "2222222", message: "b", date: "2026-10-02T00:00:00Z" }),
+      commit({ sha: "3333333", message: "Merge pull request #1", parents: 2 }),
+      commit({ sha: "4444444", message: "bump", authorLogin: "dependabot[bot]" }),
+    ],
+    capped: false,
+  },
+  pulls: { items: [pull({ authorLogin: "Copilot" }), pull({ number: 2 })], capped: false },
+  since: "2026-08-04T00:00:00Z",
+  until: "2026-11-02T00:00:00Z",
+  days: 90,
+};
+
 describe("commits", () => {
   it("finds the Claude Code trailer, also with a model name", () => {
     expect(ids(commit({ message: "fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>" }))).toEqual(["claude-code"]);
@@ -128,22 +145,6 @@ describe("formatShare", () => {
 });
 
 describe("report", () => {
-  const data: RepoData = {
-    repo: { fullName: "o/r", url: "https://github.com/o/r", description: "<b>x</b> & y", stars: 10, defaultBranch: "main", language: "Go", archived: false, fork: false },
-    commits: {
-      items: [
-        commit({ sha: "1111111", message: "a\n\nCo-Authored-By: Claude <noreply@anthropic.com>", date: "2026-09-02T00:00:00Z" }),
-        commit({ sha: "2222222", message: "b", date: "2026-10-02T00:00:00Z" }),
-        commit({ sha: "3333333", message: "Merge pull request #1", parents: 2 }),
-        commit({ sha: "4444444", message: "bump", authorLogin: "dependabot[bot]" }),
-      ],
-      capped: false,
-    },
-    pulls: { items: [pull({ authorLogin: "Copilot" }), pull({ number: 2 })], capped: false },
-    since: "2026-08-04T00:00:00Z",
-    until: "2026-11-02T00:00:00Z",
-    days: 90,
-  };
   const r = buildReport(data);
 
   it("counts commits and pull requests", () => {
@@ -181,5 +182,32 @@ describe("signatures found in real repos (registry v2)", () => {
   });
   it("does not count a person whose name contains codex", () => {
     expect(ids(commit({ authorName: "Codexia Smith", authorLogin: "codexia" }))).toEqual([]);
+  });
+});
+
+describe("attribution precedence (#2)", () => {
+  it("follows registry order, not the order of signal kinds", () => {
+    const m = cls.commit(commit({ message: "x\n\nCo-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>\n\nGenerated with Claude Code" }));
+    expect(m.map((x) => x.agentId)).toEqual(["claude-code", "copilot"]);
+  });
+  it("prefers a high-confidence agent over a medium-confidence hint", () => {
+    const m = cls.pull(pull({ authorLogin: "Copilot", branch: "claude/x" }));
+    expect(m.map((x) => x.agentId)).toEqual(["copilot", "claude-code"]);
+  });
+  it("keeps the strongest evidence within one agent", () => {
+    const m = cls.pull(pull({ branch: "codex/x", authorLogin: "chatgpt-codex-connector[bot]" }));
+    expect(m).toHaveLength(1);
+    expect(m[0]?.confidence).toBe("high");
+  });
+  it("makes agent totals add up to the AI total", () => {
+    const items = [
+      commit({ sha: "1", message: "a\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nCo-authored-by: Cursor <cursoragent@cursor.com>" }),
+      commit({ sha: "2", message: "b\n\nCo-authored-by: Codex <noreply@openai.com>" }),
+      commit({ sha: "3", message: "c" }),
+    ];
+    const r = buildReport({ ...data, commits: { items, capped: false } });
+    const sum = Object.values(r.commits.byAgent).reduce((a, b) => a + b, 0);
+    expect(sum).toBe(r.commits.ai);
+    expect(r.commits.byAgent).toEqual({ "claude-code": 1, codex: 1 });
   });
 });

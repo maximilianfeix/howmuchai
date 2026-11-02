@@ -47,10 +47,15 @@ export function createClassifier(reg: Registry): Classifier {
     return out;
   }
 
+  /** Most lines of one message that are examined; trailers and footers are short and few. */
+  const MAX_LINES = 400;
+  const trailerShape = /^[A-Za-z][A-Za-z-]{1,40}:/;
+
   /** Tests line-based signals (trailers, footers) against each line on its own. */
-  function runLines(list: CompiledSignal[], ls: string[], out: Match[]) {
+  function runLines(list: CompiledSignal[], ls: string[], out: Match[], kind: "trailer" | "footer") {
+    const candidates = (kind === "trailer" ? ls.filter((l) => trailerShape.test(l)) : ls.filter((l) => /generated/i.test(l))).slice(-MAX_LINES);
     for (const s of list) {
-      for (const line of ls) {
+      for (const line of candidates) {
         const m = s.re.exec(line);
         if (m) {
           out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
@@ -69,22 +74,31 @@ export function createClassifier(reg: Registry): Classifier {
     }
   }
 
+  const agentOrder = new Map(reg.agents.map((a, i) => [a.id, i]));
+
+  /**
+   * One match per agent (the strongest one), ordered so that the first match is the primary agent:
+   * high confidence before medium, then the order of agents in the registry.
+   */
   function dedupe(matches: Match[]): Match[] {
-    const seen = new Set<string>();
-    return matches.filter((m) => {
-      const k = m.agentId;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
+    const best = new Map<string, Match>();
+    for (const m of matches) {
+      const cur = best.get(m.agentId);
+      if (!cur || (cur.confidence === "medium" && m.confidence === "high")) best.set(m.agentId, m);
+    }
+    return [...best.values()].sort(
+      (a, b) =>
+        (a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1) ||
+        (agentOrder.get(a.agentId) ?? 1e9) - (agentOrder.get(b.agentId) ?? 1e9),
+    );
   }
 
   return {
     commit(c) {
       const out: Match[] = [];
       const ls = lines(c.message);
-      runLines(trailer, ls, out);
-      runLines(message, ls, out);
+      runLines(trailer, ls, out, "trailer");
+      runLines(message, ls, out, "footer");
       for (const field of [c.authorLogin, c.authorName, c.authorEmail, c.committerLogin, c.committerName, c.committerEmail]) {
         runField(author, field, out);
       }
@@ -93,7 +107,7 @@ export function createClassifier(reg: Registry): Classifier {
     pull(p) {
       const out: Match[] = [];
       runField(prAuthor, p.authorLogin, out);
-      runLines(prBody, lines(p.body), out);
+      runLines(prBody, lines(p.body), out, "footer");
       runField(prBranch, p.branch, out);
       return dedupe(out);
     },

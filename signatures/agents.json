@@ -105,14 +105,14 @@
         {
           "id": "codex/trailer",
           "kind": "commit-trailer",
-          "pattern": "^co-authored-by:[ \\t]*[^<\\n]*\\(codex\\)[^<\\n]*<[^>\\n]+>|^co-authored-by:[ \\t]*codex\\b[^<\\n]*<[^>\\n]+>",
+          "pattern": "^co-authored-by:[^<\\n]*\\(codex\\)[^<\\n]*<[^>\\n]+>|^co-authored-by:[ \\t]*codex\\b[^<\\n]*<[^>\\n]+>",
           "confidence": "high",
           "note": "Codex CLI, e.g. \"gpt-6-astra (Codex) <agent@example.invalid>\" or \"Codex <noreply@openai.com>\""
         },
         {
           "id": "codex/trailer-openai",
           "kind": "commit-trailer",
-          "pattern": "^co-authored-by:[ \\t]*[^<\\n]*<noreply@openai\\.com>",
+          "pattern": "^co-authored-by:[^<\\n]*<noreply@openai\\.com>",
           "confidence": "high"
         },
         {
@@ -138,7 +138,7 @@
         {
           "id": "cursor/trailer",
           "kind": "commit-trailer",
-          "pattern": "^co-authored-by:[ \\t]*[^<\\n]*<cursoragent@cursor\\.com>",
+          "pattern": "^co-authored-by:[^<\\n]*<cursoragent@cursor\\.com>",
           "confidence": "high",
           "note": "\"Cursor Agent\" or \"Cursor\""
         },
@@ -267,7 +267,7 @@
         {
           "id": "capy/trailer",
           "kind": "commit-trailer",
-          "pattern": "^co-authored-by:[ \\t]*[^<\\n]*<(?:\\d+\\+)?capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:\\d+\\+)?capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
           "confidence": "high",
           "note": "Capy AI GitHub app (capy.ai)"
         },

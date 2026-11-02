@@ -27,9 +27,12 @@ function createClassifier(reg) {
     }
     return out;
   }
-  function runLines(list, ls, out) {
+  const MAX_LINES = 400;
+  const trailerShape = /^[A-Za-z][A-Za-z-]{1,40}:/;
+  function runLines(list, ls, out, kind) {
+    const candidates = (kind === "trailer" ? ls.filter((l) => trailerShape.test(l)) : ls.filter((l) => /generated/i.test(l))).slice(-MAX_LINES);
     for (const s of list) {
-      for (const line of ls) {
+      for (const line of candidates) {
         const m = s.re.exec(line);
         if (m) {
           out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
@@ -45,21 +48,23 @@ function createClassifier(reg) {
       if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
     }
   }
+  const agentOrder = new Map(reg.agents.map((a, i) => [a.id, i]));
   function dedupe(matches) {
-    const seen = /* @__PURE__ */ new Set();
-    return matches.filter((m) => {
-      const k = m.agentId;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
+    const best = /* @__PURE__ */ new Map();
+    for (const m of matches) {
+      const cur = best.get(m.agentId);
+      if (!cur || cur.confidence === "medium" && m.confidence === "high") best.set(m.agentId, m);
+    }
+    return [...best.values()].sort(
+      (a, b) => (a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1) || (agentOrder.get(a.agentId) ?? 1e9) - (agentOrder.get(b.agentId) ?? 1e9)
+    );
   }
   return {
     commit(c2) {
       const out = [];
       const ls = lines(c2.message);
-      runLines(trailer, ls, out);
-      runLines(message, ls, out);
+      runLines(trailer, ls, out, "trailer");
+      runLines(message, ls, out, "footer");
       for (const field of [c2.authorLogin, c2.authorName, c2.authorEmail, c2.committerLogin, c2.committerName, c2.committerEmail]) {
         runField(author, field, out);
       }
@@ -68,7 +73,7 @@ function createClassifier(reg) {
     pull(p) {
       const out = [];
       runField(prAuthor, p.authorLogin, out);
-      runLines(prBody, lines(p.body), out);
+      runLines(prBody, lines(p.body), out, "footer");
       runField(prBranch, p.branch, out);
       return dedupe(out);
     },
@@ -319,14 +324,14 @@ var agents_default = {
         {
           id: "codex/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*[^<\\n]*\\(codex\\)[^<\\n]*<[^>\\n]+>|^co-authored-by:[ \\t]*codex\\b[^<\\n]*<[^>\\n]+>",
+          pattern: "^co-authored-by:[^<\\n]*\\(codex\\)[^<\\n]*<[^>\\n]+>|^co-authored-by:[ \\t]*codex\\b[^<\\n]*<[^>\\n]+>",
           confidence: "high",
           note: 'Codex CLI, e.g. "gpt-6-astra (Codex) <agent@example.invalid>" or "Codex <noreply@openai.com>"'
         },
         {
           id: "codex/trailer-openai",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*[^<\\n]*<noreply@openai\\.com>",
+          pattern: "^co-authored-by:[^<\\n]*<noreply@openai\\.com>",
           confidence: "high"
         },
         {
@@ -352,7 +357,7 @@ var agents_default = {
         {
           id: "cursor/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*[^<\\n]*<cursoragent@cursor\\.com>",
+          pattern: "^co-authored-by:[^<\\n]*<cursoragent@cursor\\.com>",
           confidence: "high",
           note: '"Cursor Agent" or "Cursor"'
         },
@@ -481,7 +486,7 @@ var agents_default = {
         {
           id: "capy/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[ \\t]*[^<\\n]*<(?:\\d+\\+)?capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
+          pattern: "^co-authored-by:[^<\\n]*<(?:\\d+\\+)?capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
           confidence: "high",
           note: "Capy AI GitHub app (capy.ai)"
         },
