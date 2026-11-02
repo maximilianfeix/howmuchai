@@ -106,7 +106,14 @@ async function main() {
     writeFile("repos.json", JSON.stringify(top, null, 1) + "\n");
   }
   const tracked = readJson<{ repos: string[] }>("tracked.json", { repos: [] });
-  const skip = readJson<Record<string, string>>("skip.json", {});
+  // Repos that answered 404/451. Entries expire after a week, then the repo is tried again.
+  type Skip = { status: number; message: string; at: string };
+  const rawSkip = readJson<Record<string, Skip | string>>("skip.json", {});
+  const skip: Record<string, Skip> = {};
+  for (const [k, v] of Object.entries(rawSkip)) {
+    if (typeof v === "string") continue; // old format without a date: try again
+    if (Date.now() - Date.parse(v.at) < 7 * 86_400_000) skip[k] = v;
+  }
   const all = [...new Map([...top.top, ...tracked.repos].map((r) => [r.toLowerCase(), r])).values()];
 
   // oldest measurement first; never-measured first of all
@@ -145,8 +152,8 @@ async function main() {
           stop = true;
           return;
         }
-        if (e instanceof GitHubError && [404, 409, 451].includes(e.status)) {
-          skip[r.toLowerCase()] = `${e.status} ${e.message}`;
+        if (e instanceof GitHubError && [404, 451].includes(e.status)) {
+          skip[r.toLowerCase()] = { status: e.status, message: e.message, at: new Date().toISOString() };
           console.log(`skip ${r}: ${e.status}`);
           continue;
         }
