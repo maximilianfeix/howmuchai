@@ -2,13 +2,15 @@
  * Handles a "track this repo" issue: validates the repository, adds it to tracked.json, measures it
  * right away, answers with the badge code and closes the issue.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { buildReport, fetchRepoData, parseRepo } from "../src/core/analyze";
 import { badgePath, cardPath, pagePath, reportPath } from "../src/core/dataset";
 import { formatShare } from "../src/core/format";
 import { GitHubClient, GitHubError } from "../src/core/github";
 import { renderBadge, renderCard, shieldsJson } from "../src/core/render";
+import { validateReport } from "../src/core/validate";
+import { writeAtomic } from "./lib/fsutil";
 
 const DATA = process.argv.includes("--data") ? process.argv[process.argv.indexOf("--data") + 1]! : ".data";
 const SITE = (process.env.HOWMUCHAI_SITE ?? "https://maximilianfeix.github.io/howmuchai").replace(/\/$/, "");
@@ -34,9 +36,7 @@ async function answer(text: string, reason: "completed" | "not_planned") {
 }
 
 function write(rel: string, content: string) {
-  const p = join(DATA, rel);
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, content);
+  writeAtomic(join(DATA, rel), content);
 }
 
 async function main() {
@@ -62,6 +62,8 @@ async function main() {
     return;
   }
   const r = buildReport(raw);
+  const v = validateReport(r);
+  if (!v.ok) throw new Error(`invalid report: ${v.errors.join("; ")}`);
   const name = r.repo.fullName;
   if (!tracked.repos.some((x) => x.toLowerCase() === name.toLowerCase())) tracked.repos.push(name);
   write("tracked.json", JSON.stringify(tracked, null, 1) + "\n");
