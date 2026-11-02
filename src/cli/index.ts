@@ -89,7 +89,7 @@ function render(r: Report, evidence: boolean): string {
     lines.push(`${c.bold("Beyond signatures")} ${c.dim("(experimental)")}`);
     if (b.estimate && b.likely) {
       lines.push(`  likely ${c.bold(`${pc(b.likely.lo)}–${pc(b.likely.hi)}`)} AI-involved, best estimate ${pc(b.likely.point)}`);
-      lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai - b.estimate.tooShort} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
+      lines.push(c.dim(`  style estimate of ${b.estimate.judged ?? r.commits.total - r.commits.ai - b.estimate.tooShort} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge${b.estimate.bots ? `, ${b.estimate.bots} by bots left out` : ""}`));
     } else {
       lines.push(c.dim(`  no estimate: ${noEstimateReason(b.reason)}`));
     }

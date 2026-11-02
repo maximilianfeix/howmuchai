@@ -77,7 +77,7 @@ function checkBeyond(b: unknown, errors: string[]) {
   if (b.estimate !== null) {
     checkRange(b.estimate, "beyond.estimate", errors);
     const e = b.estimate as Record<string, unknown>;
-    if (isObj(e) && (!["disclosed", "setup"].includes(e.gate as string) || !isCount(e.tooShort))) errors.push("beyond.estimate fields are invalid");
+    if (isObj(e) && (!["disclosed", "setup"].includes(e.gate as string) || !isCount(e.tooShort) || (e.judged !== undefined && !isCount(e.judged)) || (e.bots !== undefined && !isCount(e.bots)))) errors.push("beyond.estimate fields are invalid");
   }
   if (b.likely !== null) checkRange(b.likely, "beyond.likely", errors);
   if (b.reason !== undefined && b.reason !== null && !["no-commits", "no-evidence", "setup-only", "too-few-disclosed", "too-little-history", "all-disclosed", "too-few-judgeable", "inseparable", "too-uncertain"].includes(b.reason as string)) errors.push("beyond.reason is unknown");

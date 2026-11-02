@@ -137,7 +137,7 @@ Many people remove agent signatures, so a repo built entirely with agents can sh
 
 - **Authors who disclose agent use:** the share of commits by people who sign at least one other commit in the window.
 - **Agent setup files:** `CLAUDE.md`, `AGENTS.md`, `.cursor/`, `GEMINI.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml` and others.
-- **A style estimate with a 90% interval:** a small logistic model of commit-message style, trained on about 30,000 disclosed agent commits (signatures removed) against 13,000 commits from before coding agents in the same repositories. It compares a repo's undisclosed commits with that repo's own commits from before July 2022 and with its disclosed agent commits.
+- **A style estimate with a 90% interval:** a small logistic model of commit-message style, trained on about 14,500 disclosed agent commits (signatures removed) against 13,000 commits from before coding agents in the same 152 repositories (exact numbers in [eval/STYLE.md](eval/STYLE.md)). It compares a repo's undisclosed commits with that repo's own commits from before July 2022 and with its disclosed agent commits.
 
 ```
 maximilianfeix/proxy-scraper
