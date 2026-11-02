@@ -104,3 +104,26 @@ describe("crawler with damaged data (#8)", () => {
     expect(board.cohort.missing).toBe(1);
   }, 30_000);
 });
+
+describe("nested validation (round 2, #28)", () => {
+  it("rejects a month bucket without byAgent", () => {
+    const r = clone(good);
+    delete (r.commits.byMonth[0] as any).byAgent;
+    expect(validateReport(r).ok).toBe(false);
+  });
+  it("rejects a board entry without byAgent or with a bad share", () => {
+    const board = buildBoard([toEntry(good)], ["o/r"], [], "2026-11-01T00:00:00Z", 90, new Date("2026-11-02T00:00:00Z"));
+    const a = clone(board);
+    delete (a.repos[0] as any).byAgent;
+    expect(validateBoard(a).ok).toBe(false);
+    const b = clone(board);
+    (b.repos[0] as any).share = 7;
+    expect(validateBoard(b).ok).toBe(false);
+  });
+  it("rejects raw data with null or malformed items", async () => {
+    const { validateRepoData } = await import("../src/core/validate");
+    expect(validateRepoData({ ...clone(raw), commits: { items: [null], capped: false } }).ok).toBe(false);
+    expect(validateRepoData({ ...clone(raw), pulls: { items: [{ number: "1" }], capped: false } }).ok).toBe(false);
+    expect(validateRepoData(clone(raw)).ok).toBe(true);
+  });
+});

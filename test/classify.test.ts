@@ -242,3 +242,12 @@ describe("coverage labels (#5)", () => {
     expect(r.commits.fetched).toBe(4);
   });
 });
+
+describe("median (round 2, #29)", () => {
+  it("averages the middle values of an even list", async () => {
+    const { median } = await import("../src/core/format");
+    expect(median([0, 1])).toBe(0.5);
+    expect(median([3, 1, 2])).toBe(2);
+    expect(median([])).toBe(0);
+  });
+});

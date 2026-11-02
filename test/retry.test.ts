@@ -84,3 +84,31 @@ describe("GitHub client retries (#6)", () => {
     await expect(c.get("/x")).rejects.toBeInstanceOf(NetworkError);
   });
 });
+
+describe("response body (round 2, #32)", () => {
+  it("retries when the body cannot be read", async () => {
+    let n = 0;
+    const fetch = async () => {
+      n++;
+      if (n === 1) return new Response("{not json", { status: 200 });
+      return new Response(JSON.stringify({ ok: 2 }), { status: 200 });
+    };
+    const c = new GitHubClient({ fetch: fetch as typeof globalThis.fetch, sleep: async () => {}, random: () => 0.5 });
+    expect(await c.get("/x")).toEqual({ ok: 2 });
+    expect(n).toBe(2);
+  });
+  it("times out a body that stalls after the headers", async () => {
+    const fetch = async (_u: unknown, init?: RequestInit) =>
+      new Response(
+        new ReadableStream({
+          start(ctl) {
+            ctl.enqueue(new TextEncoder().encode("{"));
+            init?.signal?.addEventListener("abort", () => ctl.error(new Error("aborted by timeout")));
+          },
+        }),
+        { status: 200 },
+      );
+    const c = new GitHubClient({ fetch: fetch as typeof globalThis.fetch, timeoutMs: 50, attempts: 1 });
+    await expect(c.get("/x")).rejects.toBeInstanceOf(NetworkError);
+  });
+});

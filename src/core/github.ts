@@ -142,39 +142,47 @@ export class GitHubClient {
     const timer = ctrl ? setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 30_000) : null;
     const onAbort = () => ctrl?.abort();
     this.opts.signal?.addEventListener("abort", onAbort);
-    let res: Response;
     try {
-      res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
-    } catch (e) {
-      if (this.opts.signal?.aborted) throw new AbortedError();
-      throw new NetworkError(e instanceof Error ? e.message : String(e));
+      let res: Response;
+      try {
+        res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
+      } catch (e) {
+        if (this.opts.signal?.aborted) throw new AbortedError();
+        throw new NetworkError(e instanceof Error ? e.message : String(e));
+      }
+      this.requests++;
+      const limit = Number(res.headers.get("x-ratelimit-limit"));
+      const remaining = Number(res.headers.get("x-ratelimit-remaining"));
+      const reset = Number(res.headers.get("x-ratelimit-reset"));
+      // Search has its own small per-minute quota; only the core quota decides how much work is left.
+      const resource = res.headers.get("x-ratelimit-resource") ?? "core";
+      if (resource === "core" && res.headers.has("x-ratelimit-limit")) this.lastRate = { limit, remaining, reset };
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const body = (await res.json()) as { message?: string };
+          if (body.message) msg = body.message;
+        } catch {
+          /* body was not JSON */
+        }
+        const primary = (res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0";
+        const secondary = (res.status === 403 || res.status === 429) && !primary && (/secondary rate limit|abuse/i.test(msg) || res.headers.has("retry-after") || res.status === 429);
+        throw new GitHubError(msg, res.status, primary ? reset || null : null, {
+          secondary,
+          retryAfter: parseRetryAfter(res.headers.get("retry-after"), Date.now()),
+        });
+      }
+      // The timeout and abort stay armed while the body is read; a stalled or broken body is a network error.
+      try {
+        return (await res.json()) as T;
+      } catch (e) {
+        if (this.opts.signal?.aborted) throw new AbortedError();
+        throw new NetworkError(`reading the response failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     } finally {
       if (timer) clearTimeout(timer);
       this.opts.signal?.removeEventListener("abort", onAbort);
     }
-    this.requests++;
-    const limit = Number(res.headers.get("x-ratelimit-limit"));
-    const remaining = Number(res.headers.get("x-ratelimit-remaining"));
-    const reset = Number(res.headers.get("x-ratelimit-reset"));
-    // Search has its own small per-minute quota; only the core quota decides how much work is left.
-    const resource = res.headers.get("x-ratelimit-resource") ?? "core";
-    if (resource === "core" && res.headers.has("x-ratelimit-limit")) this.lastRate = { limit, remaining, reset };
-    if (!res.ok) {
-      let msg = `${res.status} ${res.statusText}`;
-      try {
-        const body = (await res.json()) as { message?: string };
-        if (body.message) msg = body.message;
-      } catch {
-        /* body was not JSON */
-      }
-      const primary = (res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0";
-      const secondary = (res.status === 403 || res.status === 429) && !primary && (/secondary rate limit|abuse/i.test(msg) || res.headers.has("retry-after") || res.status === 429);
-      throw new GitHubError(msg, res.status, primary ? reset || null : null, {
-        secondary,
-        retryAfter: parseRetryAfter(res.headers.get("retry-after"), Date.now()),
-      });
-    }
-    return (await res.json()) as T;
   }
 
   async repo(fullName: string): Promise<RepoInfo> {

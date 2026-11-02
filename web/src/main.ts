@@ -1,7 +1,7 @@
 import "./style.css";
 import { analyzeRepo, DEFAULTS, parseRepo } from "../../src/core/analyze";
 import { badgePath, cardPath, pagePath, reportPath, topCohort, type Board, type BoardEntry } from "../../src/core/dataset";
-import { escapeXml as esc, formatShare } from "../../src/core/format";
+import { escapeXml as esc, formatShare, median } from "../../src/core/format";
 import { GitHubClient, GitHubError } from "../../src/core/github";
 import { agentColor, agentName, registry } from "../../src/core/registry";
 import { coverageLabel, periodLabel, renderCard } from "../../src/core/render";
@@ -120,7 +120,12 @@ function route(): Route {
   const q = params.get("r");
   if (q && parseRepo(q)) return { name: "repo", repo: parseRepo(q)!, live: params.has("live") };
   let path = location.pathname.startsWith(BASE) ? location.pathname.slice(BASE.length) : location.pathname.replace(/^\//, "");
-  path = decodeURIComponent(path).replace(/index\.html$/, "");
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    return { name: "home" }; // malformed escape like "%" in the URL
+  }
+  path = path.replace(/index\.html$/, "");
   if (path.startsWith("leaderboard")) return { name: "leaderboard" };
   if (path.startsWith("method")) return { name: "method" };
   const m = /^r\/([^/]+)\/([^/]+)/.exec(path);
@@ -436,8 +441,7 @@ async function renderLeaderboard(g: number) {
   const aiCommits = measured.reduce((s, e) => s + e.ai, 0);
   const agentRepos: Record<string, number> = {};
   for (const e of measured) for (const id of Object.keys(e.byAgent)) agentRepos[id] = (agentRepos[id] ?? 0) + 1;
-  const shares = measured.map((e) => (e.share ?? 0)).sort((a, z) => a - z);
-  const median = shares.length ? shares[Math.floor(shares.length / 2)]! : 0;
+  const medianShare = median(measured.map((e) => e.share ?? 0));
 
   main.innerHTML = html`
     <div class="prose"><h1>The AI share of popular open source</h1>
@@ -449,7 +453,7 @@ async function renderLeaderboard(g: number) {
     <div class="lb-stats">
       <div class="card"><div class="stat">${formatShare(withAi.length, measured.length)}</div><p>of active repos have at least one AI-signed commit (${withAi.length} of ${measured.length})</p></div>
       <div class="card"><div class="stat">${formatShare(aiCommits, totalCommits)}</div><p>of all ${totalCommits.toLocaleString("en-US")} commits read carry an agent signature</p></div>
-      <div class="card"><div class="stat">${(median * 100).toFixed(1)}%</div><p>median share per repo</p></div>
+      <div class="card"><div class="stat">${(medianShare * 100).toFixed(1)}%</div><p>median share per repo</p></div>
       <div class="card"><p style="margin-bottom:6px">Repos per agent</p>${sortedAgents(agentRepos)
         .slice(0, 5)
         .map(([id, n]) => `<div style="display:flex;justify-content:space-between;font-size:14px"><span><span class="sw" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${agentColor(id)}"></span> ${esc(agentName(id))}</span><span class="mono">${n}</span></div>`)

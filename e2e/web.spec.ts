@@ -116,3 +116,16 @@ test("explains the rate limit and recovers with a token (#11)", async ({ page })
   await expect(page.locator("h1")).toHaveText("live/repo");
   await expect(page.locator(".big")).toHaveText("50%");
 });
+
+test("a malformed URL shows the homepage instead of crashing (round 2)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("r/demo/alpha/");
+  await expect(page.locator("h1")).toHaveText("demo/alpha");
+  await page.evaluate(() => {
+    history.pushState(null, "", "/howmuchai/r/o/%E0%A4%A/");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.locator("h1")).toContainText("How much of this repo");
+  expect(errors).toEqual([]);
+});
