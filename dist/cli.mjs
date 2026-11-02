@@ -1017,28 +1017,34 @@ async function main() {
     process.stdout.write(HELP);
     return;
   }
-  const flag = (name) => {
-    const i = args.indexOf(name);
-    if (i === -1) return void 0;
-    const v = args[i + 1];
-    args.splice(i, 2);
-    return v;
-  };
-  const days = Number(flag("--days") ?? DEFAULTS.days);
-  const maxCommits = Number(flag("--max") ?? DEFAULTS.maxCommits);
-  const json = args.includes("--json");
-  const evidence = args.includes("--evidence");
-  const target = args.find((a) => !a.startsWith("-"));
-  const repo = target ? parseRepo(target) : null;
-  if (!repo) {
-    process.stderr.write(`Not a GitHub repository: ${target ?? "(none)"}
+  const fail = (msg) => {
+    process.stderr.write(`${msg}
+Run "howmuchai --help" for usage.
 `);
     process.exit(2);
-  }
-  if (!Number.isFinite(days) || days < 1 || days > 3650 || !Number.isFinite(maxCommits) || maxCommits < 1) {
-    process.stderr.write("--days must be 1..3650 and --max a positive number\n");
-    process.exit(2);
-  }
+  };
+  const intFlag = (name, def, min, maxV) => {
+    const i = args.indexOf(name);
+    if (i === -1) return def;
+    const v = args[i + 1];
+    if (v === void 0 || v.startsWith("-")) fail(`${name} needs a value`);
+    if (!/^\d+$/.test(v)) fail(`${name} must be a whole number, got "${clean(v)}"`);
+    const n = Number(v);
+    if (n < min || n > maxV) fail(`${name} must be between ${min} and ${maxV}, got ${n}`);
+    args.splice(i, 2);
+    return n;
+  };
+  const days = intFlag("--days", DEFAULTS.days, 1, 3650);
+  const maxCommits = intFlag("--max", DEFAULTS.maxCommits, 1, 1e4);
+  const json = args.includes("--json");
+  const evidence = args.includes("--evidence");
+  const known = /* @__PURE__ */ new Set(["--json", "--evidence"]);
+  const unknown = args.find((a) => a.startsWith("-") && !known.has(a));
+  if (unknown) fail(`Unknown option ${clean(unknown)}`);
+  const targets = args.filter((a) => !a.startsWith("-"));
+  if (targets.length !== 1) fail(targets.length === 0 ? "Name a repository, e.g. vercel/next.js" : "Name exactly one repository");
+  const repo = parseRepo(targets[0]);
+  if (!repo) fail(`Not a GitHub repository: ${clean(targets[0])}`);
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
   const client = new GitHubClient({ token, userAgent: `howmuchai-cli/${VERSION}` });
   try {
@@ -1053,7 +1059,9 @@ async function main() {
       process.stderr.write(`Repository not found (or private): ${repo}
 `);
     } else {
-      process.stderr.write(`${clean(e instanceof Error ? e.message : String(e))}
+      let msg = clean(e instanceof Error ? e.message : String(e));
+      if (token) msg = msg.split(token).join("***");
+      process.stderr.write(`${msg}
 `);
     }
     process.exit(1);

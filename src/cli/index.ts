@@ -100,31 +100,36 @@ async function main() {
     process.stdout.write(HELP);
     return;
   }
-  const flag = (name: string) => {
-    const i = args.indexOf(name);
-    if (i === -1) return undefined;
-    const v = args[i + 1];
-    args.splice(i, 2);
-    return v;
+  const fail = (msg: string): never => {
+    process.stderr.write(`${msg}\nRun "howmuchai --help" for usage.\n`);
+    process.exit(2);
   };
-  const days = Number(flag("--days") ?? DEFAULTS.days);
-  const maxCommits = Number(flag("--max") ?? DEFAULTS.maxCommits);
+  const intFlag = (name: string, def: number, min: number, maxV: number): number => {
+    const i = args.indexOf(name);
+    if (i === -1) return def;
+    const v = args[i + 1];
+    if (v === undefined || v.startsWith("-")) fail(`${name} needs a value`);
+    if (!/^\d+$/.test(v!)) fail(`${name} must be a whole number, got "${clean(v!)}"`);
+    const n = Number(v);
+    if (n < min || n > maxV) fail(`${name} must be between ${min} and ${maxV}, got ${n}`);
+    args.splice(i, 2);
+    return n;
+  };
+  const days = intFlag("--days", DEFAULTS.days, 1, 3650);
+  const maxCommits = intFlag("--max", DEFAULTS.maxCommits, 1, 10_000);
   const json = args.includes("--json");
   const evidence = args.includes("--evidence");
-  const target = args.find((a) => !a.startsWith("-"));
-  const repo = target ? parseRepo(target) : null;
-  if (!repo) {
-    process.stderr.write(`Not a GitHub repository: ${target ?? "(none)"}\n`);
-    process.exit(2);
-  }
-  if (!Number.isFinite(days) || days < 1 || days > 3650 || !Number.isFinite(maxCommits) || maxCommits < 1) {
-    process.stderr.write("--days must be 1..3650 and --max a positive number\n");
-    process.exit(2);
-  }
+  const known = new Set(["--json", "--evidence"]);
+  const unknown = args.find((a) => a.startsWith("-") && !known.has(a));
+  if (unknown) fail(`Unknown option ${clean(unknown)}`);
+  const targets = args.filter((a) => !a.startsWith("-"));
+  if (targets.length !== 1) fail(targets.length === 0 ? "Name a repository, e.g. vercel/next.js" : "Name exactly one repository");
+  const repo = parseRepo(targets[0]!);
+  if (!repo) fail(`Not a GitHub repository: ${clean(targets[0]!)}`);
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
   const client = new GitHubClient({ token, userAgent: `howmuchai-cli/${VERSION}` });
   try {
-    const report = await analyzeRepo(repo, { days, maxCommits, client });
+    const report = await analyzeRepo(repo!, { days, maxCommits, client });
     process.stdout.write(json ? JSON.stringify(report, null, 2) + "\n" : render(report, evidence) + "\n");
   } catch (e) {
     if (e instanceof GitHubError && e.resetAt) {
@@ -133,7 +138,9 @@ async function main() {
     } else if (e instanceof GitHubError && e.status === 404) {
       process.stderr.write(`Repository not found (or private): ${repo}\n`);
     } else {
-      process.stderr.write(`${clean(e instanceof Error ? e.message : String(e))}\n`);
+      let msg = clean(e instanceof Error ? e.message : String(e));
+      if (token) msg = msg.split(token).join("***");
+      process.stderr.write(`${msg}\n`);
     }
     process.exit(1);
   }
