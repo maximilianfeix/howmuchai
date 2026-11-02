@@ -168,3 +168,14 @@ table.lb .mini .bar { margin: 0; height: 8px; }
 .facts { margin: 10px 0 12px; padding-left: 18px; font-size: 15px; }
 .facts li { margin: 3px 0; }
 .beyond .stat span { font-family: var(--sans); }
+
+/* statistics on the leaderboard */
+.lb-more { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin: 16px 0; }
+.month-trend .tval { fill: var(--text); font: 600 12px var(--mono, ui-monospace, monospace); }
+.month-trend .tlab { fill: var(--muted); font-size: 12px; }
+.month-trend .tbar:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.month-trend .tbar:hover path { fill: var(--accent-strong); }
+.lb-more > .card { min-width: 0; overflow-x: auto; }
+.lb-more .lb { width: 100%; }
+.lb-more h2 { font-size: 18px; }
+.month-trend svg { display: block; max-width: 560px; }

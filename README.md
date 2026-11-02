@@ -165,7 +165,7 @@ The full list with regular expressions lives in [`signatures/agents.json`](signa
 - **Window:** the last 90 days of the default branch, up to 500 commits, and up to 300 pull requests opened in that time. Busy repos reach the cap within days; the result then says "since &lt;date&gt;".
 - **Left out:** merge commits and dependency bots (Dependabot, Renovate, GitHub Actions, pre-commit.ci and others).
 - **One agent per item:** a commit with two signatures counts once, for the first matching agent.
-- **Squash merges:** a squash commit `… (#123)` without a signature of its own counts when pull request #123 carries one (for example the "Generated with Claude Code" footer). The link needs #123 to be merged and GitHub's `merge_commit_sha` to be that exact commit. In the top 1,000 this adds about 1,700 commits in 200 repos; a sample of 10 was checked against GitHub by hand and all were right.
+- **Squash merges:** a commit without a signature of its own counts when GitHub records it as the merge commit (`merge_commit_sha`) of a merged pull request that carries one, for example the "Generated with Claude Code" footer. A "(#123)" in the subject alone is not enough, since reverts and backports carry other pull requests' numbers. Only pull requests opened in the window are looked at, so a squash of an older pull request can still be missed.
 
 ### Why the number is a lower bound
 
