@@ -89,7 +89,11 @@ function loadBoard(): Promise<Board | null> {
       const v = validateBoard(await r.json());
       return v.ok ? v.value : null;
     })
-    .catch(() => null);
+    .catch(() => null)
+    .then((b) => {
+      if (!b) boardCache = null; // try again on the next visit
+      return b;
+    });
   return boardCache;
 }
 
@@ -151,13 +155,21 @@ function fixNav(r: Route) {
 }
 
 let firstRender = true;
+/** Increases on every navigation. Async work checks it after every await and gives up when it is stale. */
+let generation = 0;
+let inflight: AbortController | null = null;
+const current = (g: number) => g === generation;
+
 function render() {
   const r = route();
+  const g = ++generation;
+  inflight?.abort();
+  inflight = new AbortController();
   fixNav(r);
-  if (r.name === "home") renderHome();
-  else if (r.name === "leaderboard") void renderLeaderboard();
+  if (r.name === "home") renderHome(g);
+  else if (r.name === "leaderboard") void renderLeaderboard(g);
   else if (r.name === "method") renderMethod();
-  else void renderRepo(r.repo, r.live);
+  else void renderRepo(r.repo, r.live, g, inflight.signal);
   fixNav(r);
   if (!firstRender) main.focus({ preventScroll: true });
   firstRender = false;
@@ -187,7 +199,7 @@ function bindSearch() {
   });
 }
 
-function renderHome() {
+function renderHome(g: number) {
   setTitle("");
   main.innerHTML = html`
     <section class="hero">
@@ -209,6 +221,7 @@ function renderHome() {
   `;
   bindSearch();
   void loadBoard().then((b) => {
+    if (!current(g)) return;
     const el = document.getElementById("home-board");
     if (!el) return;
     if (!b || b.repos.length === 0) {
@@ -240,25 +253,26 @@ function boardTable(rows: BoardEntry[], start: number): string {
       .join("")}</tbody></table>`;
 }
 
-async function renderRepo(repo: string, forceLive: boolean) {
+async function renderRepo(repo: string, forceLive: boolean, g: number, signal: AbortSignal) {
   setTitle(repo);
   main.innerHTML = `<div class="loading" role="status">Reading ${esc(repo)}</div>`;
   let report: Report | null = null;
   let source: "stored" | "live" = "stored";
   if (!forceLive) report = await loadStored(repo);
+  if (!current(g)) return;
   if (!report) {
     source = "live";
     const token = localStorage.getItem(TOKEN_KEY);
     // In the browser, do not keep the visitor waiting for long retries.
-    const client = new GitHubClient({ token, attempts: 3, maxWaitMs: 10_000, timeoutMs: 20_000 });
+    const client = new GitHubClient({ token, attempts: 3, maxWaitMs: 10_000, timeoutMs: 20_000, signal });
     try {
       report = await analyzeRepo(repo, { client });
     } catch (e) {
-      renderError(repo, e);
+      if (current(g)) renderError(repo, e);
       return;
     }
   }
-  if (route().name !== "repo") return; // user navigated away
+  if (!current(g)) return; // the user navigated away meanwhile
   renderReport(report, source);
 }
 
@@ -402,10 +416,11 @@ function renderReport(r: Report, source: "stored" | "live") {
 
 // ---------- leaderboard ----------
 
-async function renderLeaderboard() {
+async function renderLeaderboard(g: number) {
   setTitle("Leaderboard");
   main.innerHTML = `<div class="loading" role="status">Loading leaderboard</div>`;
   const b = await loadBoard();
+  if (!current(g)) return;
   if (!b || topCohort(b).length === 0) {
     main.innerHTML = `<h1>Leaderboard</h1><p class="muted">${b ? "The first crawl is still running. Check back soon." : "The leaderboard could not be loaded. Please try again later."}</p>`;
     return;

@@ -9,3 +9,6 @@ brand/*.png
 !brand/social-preview.png
 .playwright-mcp/
 research/
+e2e/.data/
+test-results/
+playwright-report/

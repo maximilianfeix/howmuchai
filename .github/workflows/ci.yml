@@ -22,3 +22,21 @@ jobs:
         run: git diff --exit-code -- dist/cli.mjs action/index.mjs
       - name: CLI runs
         run: node dist/cli.mjs --help
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
