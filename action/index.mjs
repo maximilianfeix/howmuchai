@@ -1284,8 +1284,27 @@ function formatShare(n, d) {
   if (v < 10) return `${v.toFixed(1).replace(/\.0$/, "")}%`;
   return `${Math.round(v)}%`;
 }
+function formatRange(lo, hi) {
+  const a = Math.round(lo * 100);
+  const b = Math.round(hi * 100);
+  return a === b ? `${a}%` : `${a}\u2013${b}%`;
+}
 function escapeXml(s) {
   return s.replace(/[<>&'"]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&#39;", '"': "&quot;" })[ch]);
+}
+var NO_ESTIMATE = {
+  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
+  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
+  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
+  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
+  "all-disclosed": "every commit already carries a signature",
+  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
+  inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "too-uncertain": "the possible range would be wider than 50 percentage points",
+  "no-commits": "there are no commits in this period"
+};
+function noEstimateReason(reason) {
+  return NO_ESTIMATE[reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"];
 }
 
 // src/core/render.ts
@@ -1350,14 +1369,15 @@ function renderCard(r, theme = "dark") {
   parts.push(`<g clip-path="url(#hm-bar)">${segs.join("")}</g>`);
   parts.push(text(23, 160, p.muted, MONO, 11, periodLabel(r)));
   parts.push(text(473, 160, p.muted, SANS, 10, `${formatShare(sec.total - sec.ai, sec.total)} no signature found`, `text-anchor="end"`));
-  parts.push(text(23, 181, p.muted, SANS, 10, "Disclosed signatures; a lower bound."));
-  parts.push(markGroup(379, 155, 0.064453125, p.text, p.accent));
-  parts.push(text(412, 178, p.text, SANS, 11, "howmuchai", `font-weight="650"`));
+  const likely = r.beyond?.likely;
+  parts.push(text(23, 181, p.muted, SANS, 10, likely ? `A lower bound. Estimated likely ${formatRange(likely.lo, likely.hi)} (experimental).` : "Disclosed signatures; a lower bound."));
+  parts.push(markGroup(386, 166, 0.046875, p.text, p.accent));
+  parts.push(text(412, 183, p.text, SANS, 11, "howmuchai", `font-weight="650"`));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="495" height="195" viewBox="0 0 495 195" role="img" aria-labelledby="hm-t hm-d"><title id="hm-t">${escapeXml(`${r.repo.fullName}: ${share} AI-signed commits`)}</title><desc id="hm-d">${escapeXml(desc)}</desc>${parts.join("")}</svg>`;
 }
 function textWidth(s) {
   let w = 0;
-  for (const ch of s) w += /[il.,:;|!'1]/.test(ch) ? 3.5 : /[mwMW%—]/.test(ch) ? 9.5 : /[A-Z0-9#]/.test(ch) ? 7.5 : 6.5;
+  for (const ch of s) w += /[il.,:;|!'1]/.test(ch) ? 3.5 : /[mwMW%—≥]/.test(ch) ? 9.5 : /[A-Z0-9#]/.test(ch) ? 7.5 : 6.5;
   return Math.ceil(w);
 }
 function renderBadge(r, label = "AI-signed") {
@@ -1368,6 +1388,22 @@ function renderBadge(r, label = "AI-signed") {
   const fill = r && r.commits.total > 0 ? "#4056BC" : "#52627A";
   const title = r ? `${label}: ${value} of recent commits in ${r.repo.fullName}` : `${label}: unavailable`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" viewBox="0 0 ${w} 20" role="img" aria-label="${escapeXml(title)}"><title>${escapeXml(title)}</title><clipPath id="hm-r"><rect width="${w}" height="20" rx="3"/></clipPath><g clip-path="url(#hm-r)"><rect width="${lw}" height="20" fill="#34445A"/><rect x="${lw}" width="${vw}" height="20" fill="${fill}"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana, ${SANS}" font-size="11">${`<text x="${lw / 2}" y="14">${escapeXml(label)}</text><text x="${lw + vw / 2}" y="14">${escapeXml(value)}</text>`}</g></svg>`;
+}
+function likelyValue(r) {
+  const l = r.beyond?.likely;
+  if (l) return formatRange(l.lo, l.hi);
+  if (r.commits.total === 0) return "\u2014";
+  return `\u2265${formatShare(r.commits.ai, r.commits.total)}`;
+}
+function renderLikelyBadge(r) {
+  const label = "AI likely";
+  const value = likelyValue(r);
+  const lw = textWidth(label) + 14;
+  const vw = textWidth(value) + 14;
+  const w = lw + vw;
+  const fill = r.beyond?.likely ? "#6E56CF" : r.commits.total > 0 ? "#4056BC" : "#52627A";
+  const title = r.beyond?.likely ? `${r.repo.fullName}: likely ${value} of recent commits involve an AI agent (experimental estimate; ${formatShare(r.commits.ai, r.commits.total)} disclosed)` : `${r.repo.fullName}: at least ${value.replace("\u2265", "")} of recent commits disclose an AI agent; no estimate beyond that`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" viewBox="0 0 ${w} 20" role="img" aria-label="${escapeXml(title)}"><title>${escapeXml(title)}</title><clipPath id="hm-l"><rect width="${w}" height="20" rx="3"/></clipPath><g clip-path="url(#hm-l)"><rect width="${lw}" height="20" fill="#34445A"/><rect x="${lw}" width="${vw}" height="20" fill="${fill}"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana, ${SANS}" font-size="11"><text x="${lw / 2}" y="14">${escapeXml(label)}</text><text x="${lw + vw / 2}" y="14">${escapeXml(value)}</text></g></svg>`;
 }
 
 // src/action/index.ts
@@ -1394,11 +1430,13 @@ async function run() {
   writeFileSync(join(dir, "card-dark.svg"), renderCard(r, "dark"));
   writeFileSync(join(dir, "card-light.svg"), renderCard(r, "light"));
   writeFileSync(join(dir, "badge.svg"), renderBadge(r));
+  writeFileSync(join(dir, "badge-likely.svg"), renderLikelyBadge(r));
   writeFileSync(join(dir, "report.json"), JSON.stringify(r, null, 2) + "\n");
   const share = formatShare(r.commits.ai, r.commits.total);
   setOutput("share", share);
   setOutput("ai-commits", String(r.commits.ai));
   setOutput("commits", String(r.commits.total));
+  setOutput("likely", likelyValue(r));
   console.log(`${r.repo.fullName}: ${share} AI-signed commits (${r.commits.ai} of ${r.commits.total}, ${periodLabel(r)})`);
   if (process.env.GITHUB_STEP_SUMMARY) {
     const rows = Object.entries(r.commits.byAgent).sort((a, b) => b[1] - a[1]).map(([id, n]) => `| ${agentName(id)} | ${n} | ${formatShare(n, r.commits.total)} |`).join("\n");
@@ -1412,14 +1450,16 @@ ${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r
 |---|---:|---:|
 ${rows || "| No signatures found | 0 | 0% |"}
 
-Counts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)
+Beyond signatures (experimental): ${r.beyond?.likely ? `likely ${likelyValue(r)} AI-involved` : `no estimate, because ${noEstimateReason(r.beyond?.reason)}`}.
+
+The headline counts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)
 `
     );
   }
   if (commit) {
     git(["config", "user.name", "github-actions[bot]"]);
     git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "report.json"].map((f) => join(dir, f));
+    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "badge-likely.svg", "report.json"].map((f) => join(dir, f));
     git(["add", "--", ...files]);
     try {
       execFileSync("git", ["diff", "--cached", "--quiet", "--", ...files]);

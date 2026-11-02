@@ -18,6 +18,8 @@ export interface BoardEntry {
   measuredAt: string;
   /** "top": one of the most-starred active repos. "tracked": measured because someone asked. */
   cohort: "top" | "tracked";
+  /** Experimental likely AI share of all commits (disclosed plus estimated). Null without an estimate; missing in older boards. */
+  likely?: { point: number; lo: number; hi: number } | null;
 }
 
 /** How complete the top cohort is. */
@@ -101,6 +103,7 @@ export function toEntry(r: Report): BoardEntry {
     oldest: r.commits.oldest,
     measuredAt: r.generatedAt,
     cohort: "top",
+    likely: r.beyond?.likely ?? null,
   };
 }
 
@@ -111,6 +114,11 @@ export function reportPath(fullName: string): string {
 
 export function badgePath(fullName: string): string {
   return `badge/${fullName.toLowerCase()}.svg`;
+}
+
+/** Badge with the experimental likely range ("AI likely | 45–68%"), falling back to the disclosed lower bound ("≥13%"). */
+export function likelyBadgePath(fullName: string): string {
+  return `badge/likely/${fullName.toLowerCase()}.svg`;
 }
 
 export function cardPath(fullName: string, theme: "dark" | "light"): string {

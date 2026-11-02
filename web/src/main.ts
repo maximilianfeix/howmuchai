@@ -1,7 +1,7 @@
 import "./style.css";
 import { analyzeRepo, DEFAULTS, parseRepo } from "../../src/core/analyze";
-import { badgePath, cardPath, pagePath, reportPath, topCohort, type Board, type BoardEntry } from "../../src/core/dataset";
-import { escapeXml as esc, formatShare, median } from "../../src/core/format";
+import { badgePath, cardPath, likelyBadgePath, pagePath, reportPath, topCohort, type Board, type BoardEntry } from "../../src/core/dataset";
+import { escapeXml as esc, formatRange, formatShare, median, noEstimateReason } from "../../src/core/format";
 import { GitHubClient, GitHubError } from "../../src/core/github";
 import { agentColor, agentName, registry } from "../../src/core/registry";
 import { coverageLabel, periodLabel, renderCard } from "../../src/core/render";
@@ -245,13 +245,14 @@ function renderHome(g: number) {
 
 function boardTable(rows: BoardEntry[], start: number): string {
   return html`<table class="lb">
-    <thead><tr><th class="num">#</th><th>Repository</th><th class="num">AI-signed</th><th class="hide-sm">Agents</th><th class="num hide-sm">Commits</th><th class="num hide-sm">Stars</th></tr></thead>
+    <thead><tr><th class="num">#</th><th>Repository</th><th class="num">AI-signed</th><th class="num hide-sm" title="Experimental estimate of the AI share including undisclosed commits; blank where there is not enough evidence">Likely (est.)</th><th class="hide-sm">Agents</th><th class="num hide-sm">Commits</th><th class="num hide-sm">Stars</th></tr></thead>
     <tbody>${rows
       .map(
         (e, i) => html`<tr>
         <td class="num muted">${start + i}</td>
         <td class="repo"><a href="${url(pagePath(e.fullName))}" data-path="${pagePath(e.fullName)}">${esc(e.fullName)}</a></td>
         <td class="num">${formatShare(e.ai, e.total)}</td>
+        <td class="num hide-sm muted">${e.likely ? formatRange(e.likely.lo, e.likely.hi) : "—"}</td>
         <td class="mini hide-sm">${barHtml(e.byAgent, e.total, "small")}</td>
         <td class="num hide-sm muted">${e.total.toLocaleString("en-US")}</td>
         <td class="num hide-sm muted">${e.stars.toLocaleString("en-US")}</td>
@@ -342,17 +343,6 @@ function trendHtml(sec: Section): string {
   return `<div class="card"><h3>By month</h3><p>AI-signed commits (color) in all commits (height).</p><div class="trend" aria-hidden="true">${cols}</div></div>`;
 }
 
-const NO_ESTIMATE: Record<string, string> = {
-  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
-  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
-  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
-  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
-  "all-disclosed": "every commit already carries a signature",
-  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
-  inseparable: "this repo's human and agent commits cannot be told apart by style",
-  "too-uncertain": "the possible range would be wider than 50 percentage points",
-  "no-commits": "there are no commits in this period",
-};
 
 function beyondHtml(r: Report): string {
   const b = r.beyond;
@@ -376,7 +366,7 @@ function beyondHtml(r: Report): string {
     explain = `Estimated from the writing style of ${c.total - c.ai - e.tooShort} undisclosed commits, compared with ${e.humanReference === "own-history" ? "this repo's own commits from before July 2022" : "typical human commits from before coding agents"} and ${e.aiReference === "repo" ? "this repo's disclosed agent commits" : "typical agent commits"}. ${e.tooShort} more are too short to carry any style signal; the range treats them as unknown. Made because the repo already discloses agent use.`;
   } else {
     head = `<div class="stat" style="font-size:22px">No estimate</div>`;
-    explain = `No estimate because ${NO_ESTIMATE[b.reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"]}. Careful human writers can look like agents, so howmuchai only estimates where agent use is already evident.`;
+    explain = `No estimate because ${noEstimateReason(b.reason)}. Careful human writers can look like agents, so howmuchai only estimates where agent use is already evident.`;
   }
   return html`<div class="card beyond">
     <h3>Beyond signatures <span class="tag">experimental</span></h3>
@@ -398,6 +388,7 @@ function renderReport(r: Report, source: "stored" | "live") {
   setTitle(`${r.repo.fullName}: ${share} AI-signed`);
   const tracked = source === "stored";
   const badgeMd = `[![AI-signed commits](${abs(badgePath(r.repo.fullName))})](${repoPage})`;
+  const likelyMd = `[![AI likely](${abs(likelyBadgePath(r.repo.fullName))})](${repoPage})`;
   const cardMd = `[![howmuchai card for ${r.repo.fullName}](${abs(cardPath(r.repo.fullName, "dark"))})](${repoPage})`;
   const topAgent = sortedAgents(c.byAgent)[0];
   const tweet =
@@ -439,6 +430,7 @@ function renderReport(r: Report, source: "stored" | "live") {
       ${
         tracked
           ? `<div class="embed"><p>Badge: <img alt="AI-signed badge" src="${url(badgePath(r.repo.fullName))}" style="vertical-align:middle"></p><textarea rows="2" readonly aria-label="Badge Markdown">${esc(badgeMd)}</textarea>
+             <p>Badge with the likely range (experimental; shows "≥" the disclosed share where there is no estimate): <img alt="AI likely badge" src="${url(likelyBadgePath(r.repo.fullName))}" style="vertical-align:middle"></p><textarea rows="2" readonly aria-label="Likely badge Markdown">${esc(likelyMd)}</textarea>
              <p>Card:</p><img alt="howmuchai card" src="${url(cardPath(r.repo.fullName, "dark"))}" width="495" style="max-width:100%"><textarea rows="2" readonly aria-label="Card Markdown">${esc(cardMd)}</textarea>
              <p class="muted">Updated about once a day.</p></div>`
           : `<p>This repository is not tracked yet, so there is no live badge. <a href="https://github.com/maximilianfeix/howmuchai/issues/new?template=track-repo.yml&repo=${encodeURIComponent(r.repo.fullName)}&title=${encodeURIComponent(`Track ${r.repo.fullName}`)}">Ask to track it</a> (a bot adds it and answers with the badge code), or run the <a href="https://github.com/maximilianfeix/howmuchai#github-action">GitHub Action</a> in your own repo.</p>`
@@ -514,6 +506,7 @@ async function renderLeaderboard(g: number) {
         <button type="button" data-sort="share" aria-pressed="true">Most AI-signed</button>
         <button type="button" data-sort="stars" aria-pressed="false">Most stars</button>
         <button type="button" data-sort="ai" aria-pressed="false">Most signed commits</button>
+        <button type="button" data-sort="likely" aria-pressed="false">Highest estimate</button>
       </div>
       <select id="lb-agent" aria-label="Filter by agent" class="chip" style="padding:8px 10px">
         <option value="">All agents</option>
@@ -531,7 +524,8 @@ async function renderLeaderboard(g: number) {
     const q = (document.getElementById("lb-q") as HTMLInputElement).value.trim().toLowerCase();
     const agent = (document.getElementById("lb-agent") as HTMLSelectElement).value;
     let rows = (showTracked ? tracked : cohort).filter((e) => (!q || e.fullName.toLowerCase().includes(q)) && (!agent || (e.byAgent[agent] ?? 0) > 0));
-    const key = (e: BoardEntry) => (sort === "stars" ? e.stars : sort === "ai" ? e.ai : e.total < 10 ? -1 : (e.share ?? -1));
+    const key = (e: BoardEntry) =>
+      sort === "stars" ? e.stars : sort === "ai" ? e.ai : sort === "likely" ? (e.likely?.point ?? -1) : e.total < 10 ? -1 : (e.share ?? -1);
     rows = rows.sort((a, z) => key(z) - key(a) || z.stars - a.stars);
     const el = document.getElementById("lb-table")!;
     el.innerHTML = rows.length ? boardTable(rows.slice(0, 300), 1) + (rows.length > 300 ? `<p class="muted">Showing 300 of ${rows.length}. Use the filter.</p>` : "") : `<p class="muted">No repos match.</p>`;

@@ -1272,6 +1272,22 @@ async function analyzeRepo(input, opts = {}) {
   return buildReport(await fetchRepoData(input, opts), opts);
 }
 
+// src/core/format.ts
+var NO_ESTIMATE = {
+  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
+  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
+  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
+  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
+  "all-disclosed": "every commit already carries a signature",
+  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
+  inseparable: "this repo's human and agent commits cannot be told apart by style",
+  "too-uncertain": "the possible range would be wider than 50 percentage points",
+  "no-commits": "there are no commits in this period"
+};
+function noEstimateReason(reason) {
+  return NO_ESTIMATE[reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"];
+}
+
 // src/core/render.ts
 function coverageLabel(sec, r, unit) {
   const n = sec.total.toLocaleString("en-US");
@@ -1341,17 +1357,6 @@ function section(title, sec, unit, r) {
   lines.push(c.dim(`  ${coverageLabel(sec, r, unit)}`));
   return lines;
 }
-var NO_ESTIMATE = {
-  "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
-  "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
-  "too-few-disclosed": "fewer than 10 disclosed agent commits have a message long enough to show what agent work looks like here",
-  "too-little-history": "the repo has too few commits from before July 2022 to show what human work looks like here",
-  "all-disclosed": "every commit already carries a signature",
-  "too-few-judgeable": "fewer than 20 undisclosed commits have a message long enough to judge",
-  inseparable: "this repo's human and agent commits cannot be told apart by style",
-  "too-uncertain": "the possible range would be wider than 50 percentage points",
-  "no-commits": "there are no commits in this period"
-};
 function render(r, evidence) {
   const lines = [
     "",
@@ -1370,7 +1375,7 @@ function render(r, evidence) {
       lines.push(`  likely ${c.bold(`${pc(b.likely.lo)}\u2013${pc(b.likely.hi)}`)} AI-involved, best estimate ${pc(b.likely.point)}`);
       lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai - b.estimate.tooShort} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
     } else {
-      lines.push(c.dim(`  no estimate: ${NO_ESTIMATE[b.reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"]}`));
+      lines.push(c.dim(`  no estimate: ${noEstimateReason(b.reason)}`));
     }
     if (b.authors.aiAuthors) lines.push(`  ${pc(b.authors.commitsByAiAuthors / r.commits.total)} of commits by ${b.authors.aiAuthors}/${b.authors.authors} authors who disclose agent use here`);
     if (b.setup) lines.push(`  agent setup files: ${b.setup.length ? b.setup.map((s) => s.path).join(", ") : "none"}`);

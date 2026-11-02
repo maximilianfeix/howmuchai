@@ -5,10 +5,10 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, fetchRepoData, parseRepo } from "../src/core/analyze";
-import { badgePath, cardPath, pagePath, reportPath } from "../src/core/dataset";
-import { formatShare } from "../src/core/format";
+import { badgePath, likelyBadgePath, cardPath, pagePath, reportPath } from "../src/core/dataset";
+import { formatRange, formatShare, noEstimateReason } from "../src/core/format";
 import { GitHubClient, GitHubError } from "../src/core/github";
-import { renderBadge, renderCard, shieldsJson } from "../src/core/render";
+import { renderBadge, renderCard, renderLikelyBadge, shieldsJson } from "../src/core/render";
 import { validateReport } from "../src/core/validate";
 import { writeAtomic } from "./lib/fsutil";
 
@@ -66,20 +66,30 @@ async function main() {
   write(reportPath(name), JSON.stringify(r) + "\n");
   write(badgePath(name), renderBadge(r));
   write(badgePath(name).replace(/\.svg$/, ".json"), JSON.stringify(shieldsJson(r)));
+  write(likelyBadgePath(name), renderLikelyBadge(r));
   write(cardPath(name, "dark"), renderCard(r, "dark"));
   write(cardPath(name, "light"), renderCard(r, "light"));
 
   const page = `${SITE}/${pagePath(name)}`;
   const share = formatShare(r.commits.ai, r.commits.total);
+  const l = r.beyond?.likely;
+  const likelyLine = l
+    ? `Beyond signatures (experimental): likely **${formatRange(l.lo, l.hi)}** of these commits involve an AI agent, best estimate ${formatRange(l.point, l.point)}. The page explains the evidence.\n`
+    : `Beyond signatures: no estimate, because ${noEstimateReason(r.beyond?.reason)}.\n`;
   answer(
     [
       `**${name}** is tracked now and will be measured about once a day. Right now: **${share}** of ${r.commits.total} recent commits carry an AI agent signature.`,
       ``,
+      likelyLine,
       `Page: ${page} (live in a few minutes)`,
       ``,
       `Badge:`,
       "```markdown",
       `[![AI-signed commits](${SITE}/${badgePath(name)})](${page})`,
+      "```",
+      `Badge with the likely range (experimental, falls back to "≥" the disclosed share when there is no estimate):`,
+      "```markdown",
+      `[![AI likely](${SITE}/${likelyBadgePath(name)})](${page})`,
       "```",
       `Card:`,
       "```markdown",

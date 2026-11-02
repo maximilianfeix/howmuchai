@@ -1,4 +1,4 @@
-import { escapeXml as x, formatShare } from "./format";
+import { escapeXml as x, formatRange, formatShare } from "./format";
 import { agentColor, agentName } from "./registry";
 import type { Report, Section } from "./types";
 
@@ -87,9 +87,11 @@ export function renderCard(r: Report, theme: Theme = "dark"): string {
   parts.push(`<g clip-path="url(#hm-bar)">${segs.join("")}</g>`);
   parts.push(text(23, 160, p.muted, MONO, 11, periodLabel(r)));
   parts.push(text(473, 160, p.muted, SANS, 10, `${formatShare(sec.total - sec.ai, sec.total)} no signature found`, `text-anchor="end"`));
-  parts.push(text(23, 181, p.muted, SANS, 10, "Disclosed signatures; a lower bound."));
-  parts.push(markGroup(379, 155, 0.064453125, p.text, p.accent));
-  parts.push(text(412, 178, p.text, SANS, 11, "howmuchai", `font-weight="650"`));
+  const likely = r.beyond?.likely;
+  parts.push(text(23, 181, p.muted, SANS, 10, likely ? `A lower bound. Estimated likely ${formatRange(likely.lo, likely.hi)} (experimental).` : "Disclosed signatures; a lower bound."));
+  // mark below the "no signature found" line, so the two never overlap
+  parts.push(markGroup(386, 166, 0.046875, p.text, p.accent));
+  parts.push(text(412, 183, p.text, SANS, 11, "howmuchai", `font-weight="650"`));
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="495" height="195" viewBox="0 0 495 195" role="img" aria-labelledby="hm-t hm-d"><title id="hm-t">${x(`${r.repo.fullName}: ${share} AI-signed commits`)}</title><desc id="hm-d">${x(desc)}</desc>${parts.join("")}</svg>`;
 }
@@ -97,7 +99,7 @@ export function renderCard(r: Report, theme: Theme = "dark"): string {
 /** Rough width of a string in Verdana-like 11px text, as shields.io does. */
 function textWidth(s: string): number {
   let w = 0;
-  for (const ch of s) w += /[il.,:;|!'1]/.test(ch) ? 3.5 : /[mwMW%—]/.test(ch) ? 9.5 : /[A-Z0-9#]/.test(ch) ? 7.5 : 6.5;
+  for (const ch of s) w += /[il.,:;|!'1]/.test(ch) ? 3.5 : /[mwMW%—≥]/.test(ch) ? 9.5 : /[A-Z0-9#]/.test(ch) ? 7.5 : 6.5;
   return Math.ceil(w);
 }
 
@@ -110,6 +112,28 @@ export function renderBadge(r: Report | null, label = "AI-signed"): string {
   const fill = r && r.commits.total > 0 ? "#4056BC" : "#52627A";
   const title = r ? `${label}: ${value} of recent commits in ${r.repo.fullName}` : `${label}: unavailable`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" viewBox="0 0 ${w} 20" role="img" aria-label="${x(title)}"><title>${x(title)}</title><clipPath id="hm-r"><rect width="${w}" height="20" rx="3"/></clipPath><g clip-path="url(#hm-r)"><rect width="${lw}" height="20" fill="#34445A"/><rect x="${lw}" width="${vw}" height="20" fill="${fill}"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana, ${SANS}" font-size="11">${`<text x="${lw / 2}" y="14">${x(label)}</text><text x="${lw + vw / 2}" y="14">${x(value)}</text>`}</g></svg>`;
+}
+
+/** Value of the likely badge: the experimental range, or the disclosed share as a lower bound ("≥13%"). */
+export function likelyValue(r: Report): string {
+  const l = r.beyond?.likely;
+  if (l) return formatRange(l.lo, l.hi);
+  if (r.commits.total === 0) return "—";
+  return `≥${formatShare(r.commits.ai, r.commits.total)}`;
+}
+
+/** Flat 20px badge: "AI likely | 45–68%", or "AI likely | ≥13%" when there is no estimate. */
+export function renderLikelyBadge(r: Report): string {
+  const label = "AI likely";
+  const value = likelyValue(r);
+  const lw = textWidth(label) + 14;
+  const vw = textWidth(value) + 14;
+  const w = lw + vw;
+  const fill = r.beyond?.likely ? "#6E56CF" : r.commits.total > 0 ? "#4056BC" : "#52627A";
+  const title = r.beyond?.likely
+    ? `${r.repo.fullName}: likely ${value} of recent commits involve an AI agent (experimental estimate; ${formatShare(r.commits.ai, r.commits.total)} disclosed)`
+    : `${r.repo.fullName}: at least ${value.replace("≥", "")} of recent commits disclose an AI agent; no estimate beyond that`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" viewBox="0 0 ${w} 20" role="img" aria-label="${x(title)}"><title>${x(title)}</title><clipPath id="hm-l"><rect width="${w}" height="20" rx="3"/></clipPath><g clip-path="url(#hm-l)"><rect width="${lw}" height="20" fill="#34445A"/><rect x="${lw}" width="${vw}" height="20" fill="${fill}"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana, ${SANS}" font-size="11"><text x="${lw / 2}" y="14">${x(label)}</text><text x="${lw + vw / 2}" y="14">${x(value)}</text></g></svg>`;
 }
 
 /** shields.io endpoint JSON, see https://shields.io/badges/endpoint-badge */
