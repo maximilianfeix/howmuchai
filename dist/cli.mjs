@@ -5,7 +5,7 @@ function createClassifier(reg) {
   const signals = [];
   for (const agent of reg.agents) {
     for (const s of agent.signals) {
-      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "im") });
+      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "im"), confidence: s.confidence });
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
@@ -20,7 +20,7 @@ function createClassifier(reg) {
     if (!text) return;
     for (const s of list) {
       const m = s.re.exec(text);
-      if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120) });
+      if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
     }
   }
   function dedupe(matches) {
@@ -567,7 +567,7 @@ function summarizePulls(items, cls, evidenceLimit) {
   return sec;
 }
 function toEvidence(m, ref, title, date, url) {
-  return { agentId: m.agentId, kind: m.kind, ref, title, date, url, matched: m.matched };
+  return { agentId: m.agentId, kind: m.kind, ref, title, date, url, matched: m.matched, confidence: m.confidence };
 }
 async function fetchRepoData(input, opts = {}) {
   const fullName = parseRepo(input);

@@ -1,9 +1,10 @@
-import type { CommitInput, Match, PullInput, Registry, SignalKind } from "./types";
+import type { CommitInput, Confidence, Match, PullInput, Registry, SignalKind } from "./types";
 
 interface CompiledSignal {
   agentId: string;
   kind: SignalKind;
   re: RegExp;
+  confidence: Confidence;
 }
 
 export interface Classifier {
@@ -18,7 +19,7 @@ export function createClassifier(reg: Registry): Classifier {
   const signals: CompiledSignal[] = [];
   for (const agent of reg.agents) {
     for (const s of agent.signals) {
-      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "im") });
+      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "im"), confidence: s.confidence });
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
@@ -35,7 +36,7 @@ export function createClassifier(reg: Registry): Classifier {
     if (!text) return;
     for (const s of list) {
       const m = s.re.exec(text);
-      if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120) });
+      if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
     }
   }
 

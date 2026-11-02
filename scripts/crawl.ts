@@ -117,35 +117,43 @@ async function main() {
   console.log(`${all.length} repos, ${due.length} due, measuring up to ${MAX}`);
 
   let done = 0;
-  for (const { r } of RECLASSIFY ? [] : due) {
-    if (done >= MAX) break;
-    if (client.lastRate && client.lastRate.remaining < RESERVE) {
-      console.log(`stopping: ${client.lastRate.remaining} requests left`);
-      break;
-    }
-    try {
-      const raw = await fetchRepoData(r, { client });
-      if (RAW) {
-        const p = join(RAW, `${raw.repo.fullName.toLowerCase()}.json`);
-        mkdirSync(dirname(p), { recursive: true });
-        writeFileSync(p, JSON.stringify(raw));
+  let stop = false;
+  const queue = RECLASSIFY ? [] : due.map((d) => d.r);
+  const CONCURRENCY = Number(arg("--concurrency", "3"));
+  async function worker() {
+    while (!stop && queue.length > 0 && done < MAX) {
+      if (client.lastRate && client.lastRate.remaining < RESERVE) {
+        console.log(`stopping: ${client.lastRate.remaining} requests left`);
+        stop = true;
+        return;
       }
-      const rep = writeReport(raw);
-      done++;
-      console.log(`${String(done).padStart(4)} ${rep.repo.fullName}: ${rep.commits.ai}/${rep.commits.total} commits, ${rep.pulls.ai}/${rep.pulls.total} PRs`);
-    } catch (e) {
-      if (e instanceof GitHubError && e.resetAt) {
-        console.log("rate limit reached, stopping");
-        break;
+      const r = queue.shift()!;
+      try {
+        const raw = await fetchRepoData(r, { client });
+        if (RAW) {
+          const p = join(RAW, `${raw.repo.fullName.toLowerCase()}.json`);
+          mkdirSync(dirname(p), { recursive: true });
+          writeFileSync(p, JSON.stringify(raw));
+        }
+        const rep = writeReport(raw);
+        done++;
+        console.log(`${String(done).padStart(4)} ${rep.repo.fullName}: ${rep.commits.ai}/${rep.commits.total} commits, ${rep.pulls.ai}/${rep.pulls.total} PRs`);
+      } catch (e) {
+        if (e instanceof GitHubError && e.resetAt) {
+          console.log("rate limit reached, stopping");
+          stop = true;
+          return;
+        }
+        if (e instanceof GitHubError && [404, 409, 451].includes(e.status)) {
+          skip[r.toLowerCase()] = `${e.status} ${e.message}`;
+          console.log(`skip ${r}: ${e.status}`);
+          continue;
+        }
+        console.log(`error ${r}: ${e instanceof Error ? e.message : String(e)}`);
       }
-      if (e instanceof GitHubError && [404, 409, 451].includes(e.status)) {
-        skip[r.toLowerCase()] = `${e.status} ${e.message}`;
-        console.log(`skip ${r}: ${e.status}`);
-        continue;
-      }
-      console.log(`error ${r}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   writeFile("skip.json", JSON.stringify(skip, null, 1) + "\n");
 
   // leaderboard from every stored report that is still in the list

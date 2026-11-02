@@ -364,7 +364,7 @@ function renderReport(r: Report, source: "stored" | "live") {
     <details class="card" ${evidence.length ? "" : "hidden"}><summary>Evidence (${evidence.length} newest matches)</summary>
       <ul class="evidence">${evidence
         .map(
-          (e) => html`<li><a class="ref" href="${esc(e.url)}">${esc(e.ref)}</a><span>${esc(e.title)}</span><span class="sig"><span style="color:${agentColor(e.agentId)}">■</span> ${esc(agentName(e.agentId))} · ${esc(e.kind)} · ${esc(e.matched)}</span></li>`,
+          (e) => html`<li><a class="ref" href="${esc(e.url)}">${esc(e.ref)}</a><span>${esc(e.title)}</span><span class="sig"><span style="color:${agentColor(e.agentId)}">■</span> ${esc(agentName(e.agentId))} · ${esc(e.kind)} · ${esc(e.matched)}${e.confidence === "medium" ? " · hint (medium confidence)" : ""}</span></li>`,
         )
         .join("")}</ul>
     </details>

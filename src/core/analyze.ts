@@ -91,7 +91,7 @@ export function summarizePulls(items: PullInput[], cls: Classifier, evidenceLimi
 }
 
 function toEvidence(m: Match, ref: string, title: string, date: string, url: string): Evidence {
-  return { agentId: m.agentId, kind: m.kind, ref, title, date, url, matched: m.matched };
+  return { agentId: m.agentId, kind: m.kind, ref, title, date, url, matched: m.matched, confidence: m.confidence };
 }
 
 /** Everything fetched from GitHub for one repository; enough to rebuild a report offline. */

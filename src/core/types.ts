@@ -64,6 +64,7 @@ export interface Match {
   kind: SignalKind;
   /** The text that matched, trimmed, for the evidence list. */
   matched: string;
+  confidence: Confidence;
 }
 
 export interface Evidence {
@@ -75,6 +76,8 @@ export interface Evidence {
   date: string;
   url: string;
   matched: string;
+  /** Missing in reports made before registry v2. */
+  confidence?: Confidence;
 }
 
 export interface MonthBucket {
