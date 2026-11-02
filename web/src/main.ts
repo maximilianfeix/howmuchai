@@ -4,7 +4,7 @@ import { badgePath, cardPath, pagePath, reportPath, type Board, type BoardEntry 
 import { escapeXml as esc, formatShare } from "../../src/core/format";
 import { GitHubClient, GitHubError } from "../../src/core/github";
 import { agentColor, agentName, registry } from "../../src/core/registry";
-import { periodLabel, renderCard } from "../../src/core/render";
+import { coverageLabel, periodLabel, renderCard } from "../../src/core/render";
 import { REPORT_SCHEMA, type Report, type Section } from "../../src/core/types";
 
 const BASE = import.meta.env.BASE_URL; // "/howmuchai/" or "/"
@@ -341,14 +341,14 @@ function renderReport(r: Report, source: "stored" | "live") {
     <div class="headline">
       <div class="big">${share}</div>
       <div><p class="what">of recent commits carry an AI agent signature</p>
-      <p class="period">${esc(periodLabel(r))} on <code>${esc(r.repo.defaultBranch)}</code> · ${c.ai.toLocaleString("en-US")} signed · merges and dependency bots left out</p></div>
+      <p class="period">${esc(periodLabel(r))} on <code>${esc(r.repo.defaultBranch)}</code> · ${c.ai.toLocaleString("en-US")} signed · ${c.fetched - c.total > 0 ? `${(c.fetched - c.total).toLocaleString("en-US")} merges and dependency-bot commits left out` : "merges and dependency bots left out"}</p></div>
     </div>
     ${barHtml(c.byAgent, c.total)}
     ${legendHtml(c, "Commits")}
     <div class="grid2">
       <div class="card">
         <h3>Pull requests</h3>
-        <p>${p.total === 0 ? "No pull requests opened in this period." : `Opened in this period that carry an agent signature (bot author, footer or agent branch).`}</p>
+        <p>${p.total === 0 ? "No pull requests opened in this period." : `Pull requests that carry an agent signature (bot author, footer or marker).`} <span class="muted">${esc(coverageLabel(p, r, "pull requests"))}.</span></p>
         ${p.total > 0 ? `<div class="stat">${formatShare(p.ai, p.total)} <span class="muted" style="font-size:15px;font-weight:400">${p.ai} of ${p.total}</span></div>${barHtml(p.byAgent, p.total, "small")}${legendHtml(p, "Pull requests")}` : ""}
       </div>
       ${trendHtml(c)}

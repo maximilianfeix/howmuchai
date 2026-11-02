@@ -1,6 +1,7 @@
 import { analyzeRepo, DEFAULTS, parseRepo, VERSION } from "../core/analyze";
 import { GitHubClient, GitHubError } from "../core/github";
 import { agentColor, agentName } from "../core/registry";
+import { coverageLabel } from "../core/render";
 import type { Report, Section } from "../core/types";
 
 const HELP = `howmuchai ${VERSION}
@@ -55,8 +56,8 @@ function bar(sec: Section, width = 40): string {
   return out + c.dim("░".repeat(width - used));
 }
 
-function section(title: string, sec: Section, unit: string): string[] {
-  const lines = [`${c.bold(title)}  ${c.bold(pct(sec.ai, sec.total))} ${c.dim(`(${sec.ai} of ${sec.total} ${unit})`)}`];
+function section(title: string, sec: Section, unit: string, r: Report): string[] {
+  const lines = [`${c.bold(title)}  ${c.bold(pct(sec.ai, sec.total))} ${c.dim(`(${sec.ai} of ${sec.total})`)}`];
   lines.push(`  ${bar(sec)}`);
   const entries = Object.entries(sec.byAgent).sort((a, b) => b[1] - a[1]);
   for (const [id, n] of entries) {
@@ -66,19 +67,18 @@ function section(title: string, sec: Section, unit: string): string[] {
     const by = Object.entries(sec.hintsByAgent).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${agentName(id)} ${n}`).join(", ");
     lines.push(c.dim(`  + ${sec.hints} with only a hint, not counted (${by})`));
   }
-  if (sec.capped) lines.push(c.dim(`  read the newest ${sec.total} only (cap reached)`));
+  lines.push(c.dim(`  ${coverageLabel(sec, r, unit)}`));
   return lines;
 }
 
 function render(r: Report, evidence: boolean): string {
-  const from = r.commits.capped && r.commits.oldest ? r.commits.oldest.slice(0, 10) : r.window.since.slice(0, 10);
   const lines = [
     "",
-    `${c.bold(clean(r.repo.fullName))}  ${c.dim(`★ ${r.repo.stars.toLocaleString("en-US")} · ${from} → ${r.window.until.slice(0, 10)}`)}`,
+    `${c.bold(clean(r.repo.fullName))}  ${c.dim(`★ ${r.repo.stars.toLocaleString("en-US")} · measured ${r.window.until.slice(0, 10)}`)}`,
     "",
-    ...section("AI-signed commits", r.commits, "commits"),
+    ...section("AI-signed commits", r.commits, "commits", r),
     "",
-    ...section("AI-signed pull requests", r.pulls, "PRs opened"),
+    ...section("AI-signed pull requests", r.pulls, "pull requests", r),
     "",
   ];
   if (evidence) {

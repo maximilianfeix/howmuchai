@@ -156,25 +156,35 @@ var GitHubClient = class {
       fork: r.fork
     };
   }
-  /** Commits on the default branch since `since`, newest first, at most `max`. */
-  async commits(fullName, since, max) {
+  /**
+   * Commits on the default branch between `since` and `until`, newest first, at most `max`.
+   * `capped` is true exactly when more commits exist in the window than were returned.
+   */
+  async commits(fullName, since, max, until) {
     const items = [];
     const perPage = 100;
-    for (let page = 1; items.length < max; page++) {
-      const batch = await this.get(
-        `/repos/${fullName}/commits?since=${encodeURIComponent(since)}&per_page=${perPage}&page=${page}`
-      );
+    const range = `since=${encodeURIComponent(since)}${until ? `&until=${encodeURIComponent(until)}` : ""}`;
+    for (let page = 1; ; page++) {
+      const batch = await this.get(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
       for (const c of batch) items.push(toCommit(c));
-      if (batch.length < perPage) return { items: items.slice(0, max), capped: false };
+      if (items.length > max) return { items: items.slice(0, max), capped: true };
+      if (batch.length < perPage) return { items, capped: false };
+      if (items.length === max) {
+        const next = await this.get(`/repos/${fullName}/commits?${range}&per_page=1&page=${max + 1}`);
+        return { items, capped: next.length > 0 };
+      }
     }
-    return { items: items.slice(0, max), capped: true };
   }
-  /** Pull requests opened since `since`, newest first, at most `max`. */
-  async pulls(fullName, since, max) {
+  /**
+   * Pull requests opened between `since` and `until`, newest first, at most `max`.
+   * `capped` is true exactly when more pull requests were opened in the window than were returned.
+   */
+  async pulls(fullName, since, max, until) {
     const items = [];
     const perPage = 100;
     const sinceMs = Date.parse(since);
-    for (let page = 1; items.length < max; page++) {
+    const untilMs = until ? Date.parse(until) : Infinity;
+    for (let page = 1; ; page++) {
       let batch;
       try {
         batch = await this.get(
@@ -185,12 +195,14 @@ var GitHubClient = class {
         throw e;
       }
       for (const p of batch) {
-        if (Date.parse(p.created_at) < sinceMs) return { items: items.slice(0, max), capped: false };
+        const t = Date.parse(p.created_at);
+        if (t > untilMs) continue;
+        if (t < sinceMs) return { items: items.slice(0, max), capped: items.length > max };
         items.push(toPull(p));
+        if (items.length > max) return { items: items.slice(0, max), capped: true };
       }
-      if (batch.length < perPage) return { items: items.slice(0, max), capped: false };
+      if (batch.length < perPage) return { items, capped: false };
     }
-    return { items: items.slice(0, max), capped: true };
   }
 };
 function toCommit(c) {
@@ -725,7 +737,7 @@ function parseRepo(input2) {
   return `${m[1]}/${m[2]}`;
 }
 function emptySection() {
-  return { total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
+  return { fetched: 0, total: 0, ai: 0, byAgent: {}, hints: 0, hintsByAgent: {}, byMonth: [], evidence: [], capped: false, oldest: null };
 }
 function bucket(months, date) {
   const month = date.slice(0, 7);
@@ -756,6 +768,7 @@ function count(sec, b, matches) {
 function summarizeCommits(items, cls, evidenceLimit) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
+  sec.fetched = items.length;
   for (const c of items) {
     if (cls.isIgnoredCommit(c)) continue;
     sec.total++;
@@ -772,6 +785,7 @@ function summarizeCommits(items, cls, evidenceLimit) {
 function summarizePulls(items, cls, evidenceLimit) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
+  sec.fetched = items.length;
   for (const p of items) {
     if (cls.isIgnoredPull(p)) continue;
     sec.total++;
@@ -797,8 +811,8 @@ async function fetchRepoData(input2, opts = {}) {
   const since = new Date(now.getTime() - days * 864e5).toISOString();
   const repo = await client.repo(fullName);
   const [commits, pulls] = await Promise.all([
-    client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits),
-    client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls)
+    client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits, now.toISOString()),
+    client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls, now.toISOString())
   ]);
   return { repo, commits, pulls, since, until: now.toISOString(), days };
 }
@@ -860,10 +874,14 @@ function text(xp, y, fill, font, size, content, extra = "") {
 function topAgents(sec, n) {
   return Object.entries(sec.byAgent).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n);
 }
+function coverageLabel(sec, r, unit) {
+  const n = sec.total.toLocaleString("en-US");
+  if (sec.total === 0 && !sec.capped) return `no ${unit} in the last ${r.window.days} days`;
+  if (sec.capped && sec.oldest) return `newest ${n} ${unit}, since ${sec.oldest.slice(0, 10)}`;
+  return `${n} ${unit}, last ${r.window.days} days`;
+}
 function periodLabel(r) {
-  const n = r.commits.total.toLocaleString("en-US");
-  if (r.commits.capped && r.commits.oldest) return `since ${r.commits.oldest.slice(0, 10)} \xB7 ${n} commits`;
-  return `last ${r.window.days} days \xB7 ${n} commits`;
+  return coverageLabel(r.commits, r, "commits");
 }
 function renderCard(r, theme = "dark") {
   const p = PALETTE[theme];
@@ -958,7 +976,7 @@ async function run() {
       process.env.GITHUB_STEP_SUMMARY,
       `## howmuchai: ${share} AI-signed commits
 
-${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r.pulls.ai, r.pulls.total)} (${r.pulls.ai} of ${r.pulls.total}).
+${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r.pulls.ai, r.pulls.total)} (${r.pulls.ai} of ${coverageLabel(r.pulls, r, "pull requests")}).
 
 | Agent | Commits | Share |
 |---|---:|---:|

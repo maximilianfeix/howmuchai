@@ -9,7 +9,7 @@ import { analyzeRepo, DEFAULTS } from "../core/analyze";
 import { formatShare } from "../core/format";
 import { GitHubClient } from "../core/github";
 import { agentName } from "../core/registry";
-import { periodLabel, renderBadge, renderCard } from "../core/render";
+import { coverageLabel, periodLabel, renderBadge, renderCard } from "../core/render";
 
 function input(name: string, def = ""): string {
   return (process.env[`INPUT_${name.toUpperCase().replace(/ /g, "_")}`] ?? def).trim() || def;
@@ -52,7 +52,7 @@ async function run() {
       .join("\n");
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
-      `## howmuchai: ${share} AI-signed commits\n\n${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r.pulls.ai, r.pulls.total)} (${r.pulls.ai} of ${r.pulls.total}).\n\n| Agent | Commits | Share |\n|---|---:|---:|\n${rows || "| No signatures found | 0 | 0% |"}\n\nCounts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)\n`,
+      `## howmuchai: ${share} AI-signed commits\n\n${periodLabel(r)} on \`${r.repo.defaultBranch}\`. Pull requests: ${formatShare(r.pulls.ai, r.pulls.total)} (${r.pulls.ai} of ${coverageLabel(r.pulls, r, "pull requests")}).\n\n| Agent | Commits | Share |\n|---|---:|---:|\n${rows || "| No signatures found | 0 | 0% |"}\n\nCounts disclosed signatures only, a lower bound. [Method](https://maximilianfeix.github.io/howmuchai/method/)\n`,
     );
   }
 

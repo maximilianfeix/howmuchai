@@ -229,3 +229,16 @@ describe("hints (#3)", () => {
     expect(buildReport(data).schema).toBe(2);
   });
 });
+
+describe("coverage labels (#5)", () => {
+  it("says when the window was read completely, capped or empty", async () => {
+    const { coverageLabel } = await import("../src/core/render");
+    const r = buildReport(data);
+    expect(coverageLabel(r.commits, r, "commits")).toBe("2 commits, last 90 days");
+    const capped = { ...r.commits, capped: true, oldest: "2026-10-28T00:00:00Z" };
+    expect(coverageLabel(capped, r, "commits")).toBe("newest 2 commits, since 2026-10-28");
+    const empty = { ...r.commits, total: 0 };
+    expect(coverageLabel(empty, r, "pull requests")).toBe("no pull requests in the last 90 days");
+    expect(r.commits.fetched).toBe(4);
+  });
+});
