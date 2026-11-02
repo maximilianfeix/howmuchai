@@ -119,6 +119,19 @@ describe("Action bundle (#12)", () => {
     expect(r.stdout + r.stderr).not.toContain("ghs_token");
   });
 
+  it("never commits a file that an earlier step staged (round 2, #30)", () => {
+    const { work, remote } = repoWithRemote();
+    writeFileSync(join(work, "secret.env"), "TOKEN=1");
+    git(work, "add", "secret.env");
+    const { env } = actionEnv(work, {});
+    const r = run(ACTION, [], env, work);
+    expect(r.status, r.stderr).toBe(0);
+    const files = git(remote, "ls-tree", "-r", "--name-only", "main");
+    expect(files).toContain(".github/howmuchai/report.json");
+    expect(files).not.toContain("secret.env");
+    expect(git(work, "diff", "--cached", "--name-only")).toContain("secret.env");
+  });
+
   it("does not commit with commit=false", () => {
     const { work, remote } = repoWithRemote();
     const { env } = actionEnv(work, { INPUT_COMMIT: "false" });

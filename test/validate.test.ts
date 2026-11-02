@@ -127,3 +127,33 @@ describe("nested validation (round 2, #28)", () => {
     expect(validateRepoData(clone(raw)).ok).toBe(true);
   });
 });
+
+describe("tracking files and old reports (round 2, #31)", () => {
+  it("reads tracked/<owner>/<repo>.json, keeps tracked repos in their own cohort and assembles despite old reports", () => {
+    const data = mkdtempSync(join(tmpdir(), "hm-data-"));
+    const rawDir = mkdtempSync(join(tmpdir(), "hm-raw-"));
+    mkdirSync(join(rawDir, "o"), { recursive: true });
+    writeFileSync(join(rawDir, "o", "r.json"), JSON.stringify(raw));
+    const req = clone(raw);
+    req.repo.fullName = "small/thing";
+    req.repo.url = "https://github.com/small/thing";
+    mkdirSync(join(rawDir, "small"), { recursive: true });
+    writeFileSync(join(rawDir, "small", "thing.json"), JSON.stringify(req));
+    writeFileSync(join(data, "repos.json"), JSON.stringify({ generatedAt: new Date().toISOString(), top: ["o/r"] }));
+    mkdirSync(join(data, "tracked/small"), { recursive: true });
+    writeFileSync(join(data, "tracked/small/thing.json"), JSON.stringify({ repo: "small/thing", requestedAt: "2026-11-02T00:00:00Z" }));
+    // an old-schema report for a repo that is no longer listed
+    mkdirSync(join(data, "data/repos/gone"), { recursive: true });
+    writeFileSync(join(data, "data/repos/gone/away.json"), JSON.stringify({ ...clone(good), schema: 1, repo: { ...good.repo, fullName: "gone/away" } }));
+    const out = execFileSync("npx", ["tsx", "scripts/crawl.ts", "--data", data, "--raw", rawDir, "--reclassify"], { encoding: "utf8", env: { ...process.env, GITHUB_TOKEN: "" } });
+    expect(out).toContain("quarantined data/repos/gone/away.json");
+    const board = JSON.parse(readFileSync(join(data, "data/leaderboard.json"), "utf8"));
+    expect(board.repos.map((e: any) => `${e.fullName}:${e.cohort}`).sort()).toEqual(["o/r:top", "small/thing:tracked"]);
+    // assemble skips (does not fail on) an old-schema report that is still listed
+    writeFileSync(join(data, "data/repos/o/r.json"), JSON.stringify({ ...clone(good), schema: 1 }));
+    const site = mkdtempSync(join(tmpdir(), "hm-site-"));
+    writeFileSync(join(site, "index.html"), "<html><head><title>x</title></head><body></body></html>");
+    const asm = execFileSync("npx", ["tsx", "scripts/assemble.ts", "--site", site, "--data", data, "--no-og"], { encoding: "utf8" });
+    expect(asm).toContain("skipping 1 reports of an older schema");
+  }, 60_000);
+});

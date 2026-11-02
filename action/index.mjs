@@ -1082,12 +1082,13 @@ Counts disclosed signatures only, a lower bound. [Method](https://maximilianfeix
   if (commit) {
     git(["config", "user.name", "github-actions[bot]"]);
     git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-    git(["add", dir]);
+    const files = ["card-dark.svg", "card-light.svg", "badge.svg", "report.json"].map((f) => join(dir, f));
+    git(["add", "--", ...files]);
     try {
-      execFileSync("git", ["diff", "--cached", "--quiet"]);
+      execFileSync("git", ["diff", "--cached", "--quiet", "--", ...files]);
       console.log("No changes to commit");
     } catch {
-      git(["commit", "-m", `chore(howmuchai): ${share} AI-signed commits`]);
+      git(["commit", "-m", `chore(howmuchai): ${share} AI-signed commits`, "--", ...files]);
       git(["push"]);
     }
   }

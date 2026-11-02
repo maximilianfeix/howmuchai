@@ -13,7 +13,7 @@ import { agentName } from "../src/core/registry";
 import { periodLabel } from "../src/core/render";
 import { renderOgPng } from "./lib/og";
 import { validateBoard, validateReport } from "../src/core/validate";
-import type { Report } from "../src/core/types";
+import { REPORT_SCHEMA, type Report } from "../src/core/types";
 
 const args = process.argv.slice(2);
 const arg = (n: string, d: string) => {
@@ -58,14 +58,22 @@ if (existsSync(boardFile)) {
   const vb = validateBoard(JSON.parse(readFileSync(boardFile, "utf8")));
   if (!vb.ok) problems.push(`leaderboard: ${vb.errors.join("; ")}`);
 }
+const oldSchema = new Set<string>();
 for (const f of walk(join(DATA, "data/repos")).filter((f) => f.endsWith(".json"))) {
   try {
-    const v = validateReport(JSON.parse(readFileSync(f, "utf8")));
+    const json = JSON.parse(readFileSync(f, "utf8")) as { schema?: unknown };
+    if (json.schema !== REPORT_SCHEMA) {
+      // Older measurements are re-measured by the crawler; they are left out of the site meanwhile.
+      oldSchema.add(f);
+      continue;
+    }
+    const v = validateReport(json);
     if (!v.ok) problems.push(`${f}: ${v.errors.slice(0, 3).join("; ")}`);
   } catch (e) {
     problems.push(`${f}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
+if (oldSchema.size) console.log(`skipping ${oldSchema.size} reports of an older schema`);
 if (problems.length) {
   console.error(`invalid data, nothing assembled:\n${problems.slice(0, 30).join("\n")}`);
   process.exit(1);
@@ -73,7 +81,7 @@ if (problems.length) {
 
 // 1. data, badges and cards
 for (const d of ["data", "badge", "card"]) {
-  if (existsSync(join(DATA, d))) cpSync(join(DATA, d), join(SITE_DIR, d), { recursive: true });
+  if (existsSync(join(DATA, d))) cpSync(join(DATA, d), join(SITE_DIR, d), { recursive: true, filter: (src) => !oldSchema.has(src) });
 }
 
 // 2. top-level pages
@@ -108,7 +116,7 @@ write(
 
 // 3. one page and OG image per measured repo
 const urls = [`${SITE}/`, `${SITE}/leaderboard/`, `${SITE}/method/`];
-const reports = walk(join(DATA, "data/repos")).filter((f) => f.endsWith(".json"));
+const reports = walk(join(DATA, "data/repos")).filter((f) => f.endsWith(".json") && !oldSchema.has(f));
 let ogCount = 0;
 for (const f of reports) {
   const r = JSON.parse(readFileSync(f, "utf8")) as Report;

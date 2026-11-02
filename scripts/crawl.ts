@@ -135,7 +135,16 @@ async function main() {
     top = { generatedAt: new Date().toISOString(), top: await refreshTop() };
     writeFile("repos.json", JSON.stringify(top, null, 1) + "\n");
   }
+  // Tracked repos: one file each in tracked/<owner>/<repo>.json, plus the older tracked.json list.
   const tracked = readJson<{ repos: string[] }>("tracked.json", { repos: [] });
+  for (const f of walk(join(DATA, "tracked")).filter((f) => f.endsWith(".json"))) {
+    try {
+      const t = JSON.parse(readFileSync(f, "utf8")) as { repo?: string };
+      if (typeof t.repo === "string") tracked.repos.push(t.repo);
+    } catch {
+      console.log(`skip unreadable ${f}`);
+    }
+  }
   // Repos that answered 404/451. Entries expire after a week, then the repo is tried again.
   type Skip = { status: number; message: string; at: string };
   const rawSkip = readJson<Record<string, Skip | string>>("skip.json", {});
@@ -192,12 +201,15 @@ async function main() {
 
   // leaderboard from every stored report that is selected or tracked; statistics use the top cohort only
   const entries: BoardEntry[] = [];
+  const listed = new Set(all.map((r) => r.toLowerCase()));
   const reposDir = join(DATA, "data/repos");
   if (existsSync(reposDir)) {
     for (const owner of readdirSync(reposDir)) {
       for (const f of readdirSync(join(reposDir, owner))) {
-        const rep = storedReport(`${owner}/${f.replace(/\.json$/, "")}`);
+        const name = `${owner}/${f.replace(/\.json$/, "")}`;
+        const rep = storedReport(name);
         if (rep) entries.push(toEntry(rep));
+        else if (existsSync(join(DATA, reportPath(name))) && !listed.has(name.toLowerCase())) quarantine(reportPath(name), "old schema, no longer selected or tracked");
       }
     }
   }
