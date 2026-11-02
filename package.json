@@ -1,6 +1,6 @@
 {
   "name": "howmuchai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "How much of this repo was built with AI? Measures commits and pull requests that carry an AI coding-agent signature.",
   "type": "module",
   "license": "MIT",

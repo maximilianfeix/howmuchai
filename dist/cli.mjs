@@ -368,6 +368,7 @@ function toPull(p) {
     branch: p.head?.ref ?? "",
     createdAt: p.created_at,
     mergedAt: p.merged_at,
+    mergeCommitSha: p.merge_commit_sha ?? null,
     url: p.html_url
   };
 }
@@ -1084,7 +1085,7 @@ function score(model, message) {
 
 // src/core/analyze.ts
 var styleModel = style_model_default;
-var VERSION = "0.1.0";
+var VERSION = "0.2.0";
 var DEFAULTS = { days: 90, maxCommits: 500, maxPulls: 300, evidenceLimit: 40 };
 function parseRepo(input) {
   const s = input.trim().replace(/\.git$/, "").replace(/\/+$/, "");
@@ -1122,7 +1123,30 @@ function count(sec, b, matches) {
   }
   return true;
 }
-function summarizeCommits(items, cls, evidenceLimit) {
+var LINK_DAYS = 2;
+function linkedPull(c2, pulls) {
+  const m = /\(#(\d{1,9})\)\s*$/.exec(c2.message.split("\n", 1)[0] ?? "");
+  if (!m) return null;
+  const p = pulls.get(Number(m[1]));
+  if (!p || !p.mergedAt) return null;
+  if (p.mergeCommitSha) return p.mergeCommitSha === c2.sha ? p : null;
+  const dt = Math.abs(Date.parse(c2.date) - Date.parse(p.mergedAt));
+  return Number.isFinite(dt) && dt <= LINK_DAYS * 864e5 ? p : null;
+}
+function commitMatches(c2, cls, pulls) {
+  const own = cls.commit(c2);
+  if (own.some((m) => m.confidence === "high")) return { matches: own, viaPull: null };
+  const p = linkedPull(c2, pulls);
+  if (p && !cls.isIgnoredPull(p)) {
+    const pm = cls.pull(p).filter((m) => m.confidence === "high");
+    if (pm.length) return { matches: [...pm, ...own], viaPull: p.number };
+  }
+  return { matches: own, viaPull: null };
+}
+function pullIndex(pulls) {
+  return new Map(pulls.map((p) => [p.number, p]));
+}
+function summarizeCommits(items, cls, evidenceLimit, pulls = /* @__PURE__ */ new Map()) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
   sec.fetched = items.length;
@@ -1132,9 +1156,16 @@ function summarizeCommits(items, cls, evidenceLimit) {
     if (!sec.oldest || c2.date < sec.oldest) sec.oldest = c2.date;
     const b = bucket(months, c2.date);
     b.total++;
-    const matches = cls.commit(c2);
+    const { matches, viaPull } = commitMatches(c2, cls, pulls);
     if (!count(sec, b, matches)) continue;
-    if (sec.evidence.length < evidenceLimit) sec.evidence.push(toEvidence(matches[0], c2.sha.slice(0, 7), firstLine(c2.message), c2.date, c2.url));
+    if (sec.evidence.length < evidenceLimit) {
+      const e = toEvidence(matches[0], c2.sha.slice(0, 7), firstLine(c2.message), c2.date, c2.url);
+      if (viaPull !== null) {
+        e.viaPull = viaPull;
+        e.matched = `PR #${viaPull}: ${e.matched}`;
+      }
+      sec.evidence.push(e);
+    }
   }
   sec.byMonth = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
   return sec;
@@ -1183,7 +1214,8 @@ async function fetchRepoData(input, opts = {}) {
     };
     data.setup = await optional(() => client.agentSetup(repo.fullName));
     const cls = createClassifier(registry);
-    const disclosed = commits.items.filter((c2) => !cls.isIgnoredCommit(c2) && cls.commit(c2).some((m) => m.confidence === "high")).length;
+    const prs = pullIndex(pulls.items);
+    const disclosed = commits.items.filter((c2) => !cls.isIgnoredCommit(c2) && commitMatches(c2, cls, prs).matches.some((m) => m.confidence === "high")).length;
     if (disclosed >= GATE_DISCLOSED) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
@@ -1195,7 +1227,8 @@ var MIN_JUDGEABLE = 20;
 function beyondSignatures(d, cls) {
   const items = d.commits.items.filter((c2) => !cls.isIgnoredCommit(c2));
   const signed = /* @__PURE__ */ new Set();
-  for (const c2 of items) if (cls.commit(c2).some((m) => m.confidence === "high")) signed.add(c2);
+  const prs = pullIndex(d.pulls.items);
+  for (const c2 of items) if (commitMatches(c2, cls, prs).matches.some((m) => m.confidence === "high")) signed.add(c2);
   const loginByEmail = /* @__PURE__ */ new Map();
   for (const c2 of items) if (c2.authorLogin && c2.authorEmail) loginByEmail.set(c2.authorEmail.toLowerCase(), c2.authorLogin.toLowerCase());
   const who = (c2) => {
@@ -1258,7 +1291,7 @@ function beyondSignatures(d, cls) {
 function buildReport(d, opts = {}) {
   const evidenceLimit = opts.evidenceLimit ?? DEFAULTS.evidenceLimit;
   const cls = createClassifier(registry);
-  const cSec = summarizeCommits(d.commits.items, cls, evidenceLimit);
+  const cSec = summarizeCommits(d.commits.items, cls, evidenceLimit, pullIndex(d.pulls.items));
   cSec.capped = d.commits.capped;
   const pSec = summarizePulls(d.pulls.items, cls, evidenceLimit);
   pSec.capped = d.pulls.capped;
@@ -1286,6 +1319,19 @@ async function analyzeRepo(input, opts = {}) {
 }
 
 // src/core/format.ts
+function formatShare(n, d) {
+  if (d === 0) return "\u2014";
+  if (n === 0) return "0%";
+  const v = 100 * n / d;
+  if (v < 0.1) return "<0.1%";
+  if (v < 10) return `${v.toFixed(1).replace(/\.0$/, "")}%`;
+  return `${Math.round(v)}%`;
+}
+function formatRange(lo, hi) {
+  const a = Math.round(lo * 100);
+  const b = Math.round(hi * 100);
+  return a === b ? `${a}%` : `${a}\u2013${b}%`;
+}
 var NO_ESTIMATE = {
   "no-evidence": "this repo discloses fewer than 10 agent commits, and without that a number would be a guess",
   "setup-only": "the repo has agent setup files but discloses fewer than 10 agent commits; setup files show that agents are used, not how much, and some human commit styles look like agent text",
@@ -1301,12 +1347,500 @@ function noEstimateReason(reason) {
   return NO_ESTIMATE[reason ?? "no-evidence"] ?? NO_ESTIMATE["no-evidence"];
 }
 
+// src/core/dataset.ts
+function reportPath(fullName) {
+  return `data/repos/${fullName.toLowerCase()}.json`;
+}
+function pagePath(fullName) {
+  return `r/${fullName.toLowerCase()}/`;
+}
+
 // src/core/render.ts
 function coverageLabel(sec, r, unit) {
   const n = sec.total.toLocaleString("en-US");
   if (sec.total === 0 && !sec.capped) return `no ${unit} in the last ${r.window.days} days`;
   if (sec.capped && sec.oldest) return `newest ${n} ${unit}, since ${sec.oldest.slice(0, 10)}`;
   return `${n} ${unit}, last ${r.window.days} days`;
+}
+
+// src/core/types.ts
+var REPORT_SCHEMA = 2;
+
+// src/core/validate.ts
+var REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+var GH_URL = /^https:\/\/github\.com\//;
+var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+var isCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+var isDate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && Number.isFinite(Date.parse(v));
+function counts(map, path, errors) {
+  if (!isObj(map)) {
+    errors.push(`${path} is not an object`);
+    return 0;
+  }
+  let sum = 0;
+  for (const [k, v] of Object.entries(map)) {
+    if (!/^[a-z0-9-]+$/.test(k)) errors.push(`${path} has a bad agent id ${JSON.stringify(k)}`);
+    if (!isCount(v)) errors.push(`${path}.${k} is not a count`);
+    else sum += v;
+  }
+  return sum;
+}
+function checkEvidence(ev, path, errors) {
+  if (!Array.isArray(ev)) return errors.push(`${path} is not a list`);
+  ev.forEach((e, i) => {
+    if (!isObj(e)) return errors.push(`${path}[${i}] is not an object`);
+    const x = e;
+    if (typeof x.url !== "string" || !GH_URL.test(x.url)) errors.push(`${path}[${i}].url is not a github.com link`);
+    for (const f of ["agentId", "kind", "ref", "title", "matched"]) if (typeof x[f] !== "string") errors.push(`${path}[${i}].${f} missing`);
+  });
+}
+function checkSection(s, path, errors) {
+  if (!isObj(s)) return errors.push(`${path} missing`);
+  const x = s;
+  for (const f of ["fetched", "total", "ai", "hints"]) if (!isCount(x[f])) errors.push(`${path}.${f} is not a count`);
+  if (isCount(x.total) && isCount(x.ai) && x.ai > x.total) errors.push(`${path}.ai is larger than total`);
+  if (isCount(x.total) && isCount(x.fetched) && x.total > x.fetched) errors.push(`${path}.total is larger than fetched`);
+  if (isCount(x.ai) && counts(x.byAgent, `${path}.byAgent`, errors) !== x.ai) errors.push(`${path}.byAgent does not add up to ai`);
+  if (isCount(x.hints) && counts(x.hintsByAgent, `${path}.hintsByAgent`, errors) !== x.hints) errors.push(`${path}.hintsByAgent does not add up to hints`);
+  if (typeof x.capped !== "boolean") errors.push(`${path}.capped is not a boolean`);
+  if (x.oldest !== null && !isDate(x.oldest)) errors.push(`${path}.oldest is not a date`);
+  if (!Array.isArray(x.byMonth)) errors.push(`${path}.byMonth is not a list`);
+  else {
+    let total = 0;
+    let ai = 0;
+    for (const m of x.byMonth) {
+      if (!isObj(m) || typeof m.month !== "string" || !/^\d{4}-\d{2}$/.test(m.month) || !isCount(m.total) || !isCount(m.ai)) {
+        errors.push(`${path}.byMonth has a bad entry`);
+        continue;
+      }
+      if (counts(m.byAgent, `${path}.byMonth[${m.month}].byAgent`, errors) !== m.ai) errors.push(`${path}.byMonth[${m.month}].byAgent does not add up`);
+      total += m.total;
+      ai += m.ai;
+    }
+    if (isCount(x.total) && total !== x.total) errors.push(`${path}.byMonth totals do not add up`);
+    if (isCount(x.ai) && ai !== x.ai) errors.push(`${path}.byMonth AI counts do not add up`);
+  }
+  checkEvidence(x.evidence, `${path}.evidence`, errors);
+}
+var isShare = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+function checkRange(x, path, errors) {
+  if (!isObj(x) || !isShare(x.point) || !isShare(x.lo) || !isShare(x.hi)) return errors.push(`${path} is not a share range`);
+  if (!(x.lo <= x.point + 1e-9 && x.point <= x.hi + 1e-9)) errors.push(`${path} is not ordered lo \u2264 point \u2264 hi`);
+}
+function checkBeyond(b, errors) {
+  if (!isObj(b)) return errors.push("beyond is not an object");
+  if (b.setup !== null && !(Array.isArray(b.setup) && b.setup.every((s) => isObj(s) && typeof s.path === "string" && typeof s.agentId === "string"))) errors.push("beyond.setup is invalid");
+  const a = b.authors;
+  if (!isObj(a) || !isCount(a.aiAuthors) || !isCount(a.authors) || !isCount(a.commitsByAiAuthors) || a.aiAuthors > a.authors) errors.push("beyond.authors is invalid");
+  if (b.estimate !== null) {
+    checkRange(b.estimate, "beyond.estimate", errors);
+    const e = b.estimate;
+    if (isObj(e) && (!["disclosed", "setup"].includes(e.gate) || !isCount(e.tooShort) || e.judged !== void 0 && !isCount(e.judged) || e.bots !== void 0 && !isCount(e.bots))) errors.push("beyond.estimate fields are invalid");
+  }
+  if (b.likely !== null) checkRange(b.likely, "beyond.likely", errors);
+  if (b.reason !== void 0 && b.reason !== null && !["no-commits", "no-evidence", "setup-only", "too-few-disclosed", "too-little-history", "all-disclosed", "too-few-judgeable", "inseparable", "too-uncertain"].includes(b.reason)) errors.push("beyond.reason is unknown");
+}
+function validateReport(v) {
+  const errors = [];
+  if (!isObj(v)) return { ok: false, errors: ["not an object"] };
+  const r = v;
+  if (r.schema !== REPORT_SCHEMA) errors.push(`schema ${String(r.schema)} is not ${REPORT_SCHEMA}`);
+  if (!isObj(r.repo) || typeof r.repo.fullName !== "string" || !REPO.test(r.repo.fullName)) errors.push("repo.fullName is not owner/repo");
+  else {
+    if (typeof r.repo.url !== "string" || !GH_URL.test(r.repo.url)) errors.push("repo.url is not a github.com link");
+    if (!isCount(r.repo.stars)) errors.push("repo.stars is not a count");
+  }
+  if (!isObj(r.window) || !isDate(r.window.since) || !isDate(r.window.until) || !isCount(r.window.days)) errors.push("window is invalid");
+  else if (Date.parse(r.window.since) > Date.parse(r.window.until)) errors.push("window starts after it ends");
+  if (!isDate(r.generatedAt)) errors.push("generatedAt is not a date");
+  else if (Date.parse(r.generatedAt) > Date.now() + 36e5) errors.push("generatedAt is in the future");
+  checkSection(r.commits, "commits", errors);
+  checkSection(r.pulls, "pulls", errors);
+  if (r.beyond !== void 0) checkBeyond(r.beyond, errors);
+  if (isObj(r.commits) && isCount(r.commits.total) && isCount(r.commits.ai)) {
+    const want = r.commits.total > 0 ? r.commits.ai / r.commits.total : null;
+    if (r.share !== want && !(typeof r.share === "number" && want !== null && Math.abs(r.share - want) < 1e-9)) errors.push("share does not match ai/total");
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, value: v };
+}
+function checkEntry(e, i, errors) {
+  if (!isObj(e)) return errors.push(`repos[${i}] is not an object`);
+  const x = e;
+  if (typeof x.fullName !== "string" || !REPO.test(x.fullName)) errors.push(`repos[${i}].fullName is not owner/repo`);
+  for (const f of ["stars", "ai", "total", "prAi", "prTotal"]) if (!isCount(x[f])) errors.push(`repos[${i}].${f} is not a count`);
+  if (isCount(x.ai) && isCount(x.total) && x.ai > x.total) errors.push(`repos[${i}].ai is larger than total`);
+  if (isCount(x.ai) && counts(x.byAgent, `repos[${i}].byAgent`, errors) !== x.ai) errors.push(`repos[${i}].byAgent does not add up to ai`);
+  if (x.share !== null && (typeof x.share !== "number" || !Number.isFinite(x.share) || x.share < 0 || x.share > 1)) errors.push(`repos[${i}].share is not between 0 and 1`);
+  if (x.top !== null && typeof x.top !== "string") errors.push(`repos[${i}].top is not an agent id`);
+  if (typeof x.capped !== "boolean") errors.push(`repos[${i}].capped is not a boolean`);
+  if (!isDate(x.measuredAt)) errors.push(`repos[${i}].measuredAt is not a date`);
+  if (x.cohort !== void 0 && x.cohort !== "top" && x.cohort !== "tracked") errors.push(`repos[${i}].cohort is unknown`);
+  if (x.likely !== void 0 && x.likely !== null) {
+    const l = x.likely;
+    const ok = isObj(l) && ["lo", "point", "hi"].every((k) => typeof l[k] === "number" && Number.isFinite(l[k]));
+    const { lo, point, hi } = l ?? {};
+    if (!ok || lo < 0 || hi > 1 || lo > point || point > hi) errors.push(`repos[${i}].likely is not a range lo \u2264 point \u2264 hi in 0..1`);
+  }
+}
+function validateBoard(v) {
+  const errors = [];
+  if (!isObj(v)) return { ok: false, errors: ["not an object"] };
+  const b = v;
+  if (b.schema !== 1) errors.push("schema is not 1");
+  if (!isDate(b.generatedAt)) errors.push("generatedAt is not a date");
+  if (!isCount(b.days)) errors.push("days is not a count");
+  if (!Array.isArray(b.repos)) errors.push("repos is not a list");
+  else b.repos.forEach((e, i) => checkEntry(e, i, errors));
+  return errors.length ? { ok: false, errors: errors.slice(0, 20) } : { ok: true, value: v };
+}
+
+// src/mcp/server.ts
+var SITE = "https://maximilianfeix.github.io/howmuchai";
+var PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+var ToolError = class extends Error {
+};
+var READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+var TOOLS = [
+  {
+    name: "measure_repo",
+    title: "Measure AI-signed commits of a GitHub repo",
+    description: "Share of a public GitHub repo's recent commits and pull requests that disclose an AI coding agent (co-author trailers, agent bot accounts, default PR footers, branch names), per agent, with evidence links. Also returns the experimental 'beyond signatures' range when the repo itself discloses enough agent use. Disclosed signatures are a lower bound: no signature does not mean human-written. Uses the stored daily measurement when the repo is tracked, else measures live (about 10 GitHub API requests).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "owner/repo or a github.com URL" },
+        live: { type: "boolean", description: "Measure now instead of using the stored daily measurement. Default false." },
+        days: { type: "integer", minimum: 1, maximum: 365, description: `Window in days. Default ${DEFAULTS.days}; other values always measure live.` },
+        evidence: { type: "integer", minimum: 0, maximum: 50, description: "How many matching commits/PRs to list. Default 5." }
+      },
+      required: ["repo"],
+      additionalProperties: false
+    },
+    annotations: { title: "Measure repo", ...READ_ONLY }
+  },
+  {
+    name: "leaderboard",
+    title: "AI-signed share of the most-starred GitHub repos",
+    description: "Rows of the howmuchai leaderboard: the 1,000 most-starred GitHub repos with recent pushes, measured daily. Filter by name or agent and sort by AI-signed share, stars, signed commits or the experimental estimate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sort: { type: "string", enum: ["share", "stars", "ai", "likely"], description: "Default share (repos with fewer than 10 commits last)." },
+        agent: { type: "string", description: `Only repos with commits signed by this agent id: ${registry.agents.map((a) => a.id).join(", ")}` },
+        query: { type: "string", description: "Substring of owner/repo." },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Default 20." },
+        tracked: { type: "boolean", description: "List the repos tracked on request instead of the top cohort." }
+      },
+      additionalProperties: false
+    },
+    annotations: { title: "Leaderboard", ...READ_ONLY }
+  },
+  {
+    name: "check_commit",
+    title: "Check a commit message for AI agent signatures",
+    description: "Runs the howmuchai signature registry on one commit message (and optional author), offline. Shows which agent signatures match and whether they count (high confidence) or are only hints. Use it to test trailers or to explain why a commit was counted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Full commit message, including trailers." },
+        author_name: { type: "string" },
+        author_email: { type: "string" },
+        author_login: { type: "string", description: "GitHub login of the author." }
+      },
+      required: ["message"],
+      additionalProperties: false
+    },
+    annotations: { title: "Check commit", ...READ_ONLY, openWorldHint: false }
+  },
+  {
+    name: "list_signatures",
+    title: "List the AI agent signatures howmuchai knows",
+    description: "The signature registry: per agent, where each signal is looked for, its pattern and whether it counts or is only a hint.",
+    inputSchema: {
+      type: "object",
+      properties: { agent: { type: "string", description: "Only this agent id." } },
+      additionalProperties: false
+    },
+    annotations: { title: "List signatures", ...READ_ONLY, openWorldHint: false }
+  }
+];
+var INSTRUCTIONS = "howmuchai counts what is disclosed: commits and pull requests with an AI agent signature. Report shares as a lower bound of AI use and never call a repo or commit human-written because it has no signature. The 'beyond signatures' range is experimental; quote it as a range with its caveat, never as a verdict on single commits.";
+function str(args, k, required = false) {
+  const v = args[k];
+  if (v === void 0 || v === null) {
+    if (required) throw new ToolError(`"${k}" is required`);
+    return void 0;
+  }
+  if (typeof v !== "string") throw new ToolError(`"${k}" must be a string`);
+  if (v.length > 65536) throw new ToolError(`"${k}" is too long`);
+  return v;
+}
+function int(args, k, def, min, max) {
+  const v = args[k];
+  if (v === void 0 || v === null) return def;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) throw new ToolError(`"${k}" must be a whole number from ${min} to ${max}`);
+  return v;
+}
+function bool(args, k) {
+  const v = args[k];
+  if (v === void 0 || v === null) return false;
+  if (typeof v !== "boolean") throw new ToolError(`"${k}" must be true or false`);
+  return v;
+}
+function onlyKnown(args, tool) {
+  const known = new Set(Object.keys(tool.inputSchema.properties));
+  const extra = Object.keys(args).find((k) => !known.has(k));
+  if (extra) throw new ToolError(`Unknown argument "${extra.slice(0, 100)}"`);
+}
+var pc = (x) => `${Math.round(100 * x)}%`;
+function summarize(r, evidence, source) {
+  const c2 = r.commits, p = r.pulls, b = r.beyond;
+  const agents = Object.entries(c2.byAgent).sort((a, z) => z[1] - a[1]).map(([id, n]) => ({ agent: id, name: agentName(id), commits: n, share: n / Math.max(1, c2.total) }));
+  const page = `${SITE}/${pagePath(r.repo.fullName)}`;
+  const structured = {
+    repo: r.repo.fullName,
+    stars: r.repo.stars,
+    window: r.window,
+    measuredAt: r.generatedAt,
+    source,
+    commits: { total: c2.total, aiSigned: c2.ai, share: r.share, hints: c2.hints, coverage: coverageLabel(c2, r, "commits"), capped: c2.capped },
+    pullRequests: { total: p.total, aiSigned: p.ai, share: p.total ? p.ai / p.total : null, coverage: coverageLabel(p, r, "pull requests"), capped: p.capped },
+    agents,
+    beyondSignatures: b ? {
+      experimental: true,
+      likely: b.likely,
+      noEstimateBecause: b.likely ? null : noEstimateReason(b.reason),
+      commitsByAuthorsWhoDiscloseAgentUse: c2.total ? b.authors.commitsByAiAuthors / c2.total : null,
+      agentSetupFiles: b.setup?.map((s) => s.path) ?? null
+    } : null,
+    evidence: [...c2.evidence, ...p.evidence].slice(0, evidence).map((e) => ({ agent: e.agentId, ref: e.ref, title: e.title, matched: e.matched, url: e.url })),
+    page
+  };
+  const lines = [
+    `${r.repo.fullName}: ${formatShare(c2.ai, c2.total)} of commits are AI-signed (${c2.ai} of ${c2.total}; ${coverageLabel(c2, r, "commits")}).`,
+    `Pull requests: ${formatShare(p.ai, p.total)} (${p.ai} of ${p.total}).`,
+    agents.length ? `Agents: ${agents.map((a) => `${a.name} ${formatShare(a.commits, c2.total)}`).join(", ")}.` : "No agent signatures found (this does not mean human-written)."
+  ];
+  if (b?.likely) lines.push(`Beyond signatures (experimental): likely ${formatRange(b.likely.lo, b.likely.hi)} AI-involved, best estimate ${pc(b.likely.point)}.`);
+  else if (b) lines.push(`Beyond signatures: no estimate, because ${noEstimateReason(b.reason)}.`);
+  for (const e of structured.evidence) lines.push(`- ${e.ref} ${agentName(e.agent)}: ${e.matched} ${e.url}`);
+  lines.push(`Signatures are a lower bound of AI use. Measured ${r.generatedAt.slice(0, 10)} (${source}). ${page}`);
+  return { text: lines.join("\n"), structured };
+}
+function createServer(deps = {}) {
+  const doFetch = deps.fetch ?? fetch;
+  const token = deps.token ?? null;
+  const github = deps.github ?? (() => new GitHubClient({ token, userAgent: `howmuchai-mcp/${VERSION}`, attempts: 3, maxWaitMs: 3e4, timeoutMs: 3e4 }));
+  const cls = createClassifier(registry);
+  let board = null;
+  let boardAt = 0;
+  const redact = (s) => token ? s.split(token).join("***") : s;
+  async function getJson(path) {
+    const res = await doFetch(`${SITE}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(2e4) });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new ToolError(`The howmuchai site answered ${res.status} for ${path}`);
+    return res.json();
+  }
+  async function loadBoard() {
+    if (!board || Date.now() - boardAt > 10 * 6e4) {
+      boardAt = Date.now();
+      board = (async () => {
+        const v = validateBoard(await getJson("data/leaderboard.json"));
+        if (!v.ok) throw new ToolError("The leaderboard is not available right now");
+        return v.value;
+      })();
+    }
+    try {
+      return await board;
+    } catch (e) {
+      board = null;
+      throw e;
+    }
+  }
+  async function measure(args) {
+    const repo = parseRepo(str(args, "repo", true));
+    if (!repo) throw new ToolError("Not a GitHub repository. Use owner/repo or a github.com URL.");
+    const live = bool(args, "live");
+    const days = int(args, "days", DEFAULTS.days, 1, 365);
+    const evidence = int(args, "evidence", 5, 0, 50);
+    if (!live && days === DEFAULTS.days) {
+      const stored = await getJson(reportPath(repo)).catch(() => null);
+      const v = stored ? validateReport(stored) : null;
+      if (v?.ok) return summarize(v.value, evidence, "stored");
+    }
+    try {
+      return summarize(await analyzeRepo(repo, { client: github(), days }), evidence, "live");
+    } catch (e) {
+      if (e instanceof GitHubError && e.status === 404) throw new ToolError(`Repository not found or private: ${repo}`);
+      if (e instanceof GitHubError && (e.resetAt || e.secondary))
+        throw new ToolError(`GitHub API rate limit reached${token ? "" : ". Set GITHUB_TOKEN in the server's environment for 5,000 requests per hour"}.`);
+      throw new ToolError(`Could not measure ${repo}: ${redact(e instanceof Error ? e.message : String(e))}`);
+    }
+  }
+  async function leaderboard(args) {
+    const sort = str(args, "sort") ?? "share";
+    if (!["share", "stars", "ai", "likely"].includes(sort)) throw new ToolError('"sort" must be share, stars, ai or likely');
+    const agent = str(args, "agent");
+    if (agent && !registry.agents.some((a) => a.id === agent)) throw new ToolError(`Unknown agent "${agent.slice(0, 100)}". Known: ${registry.agents.map((a) => a.id).join(", ")}`);
+    const query = str(args, "query")?.toLowerCase();
+    const limit = int(args, "limit", 20, 1, 100);
+    const tracked = bool(args, "tracked");
+    const b = await loadBoard();
+    const key = (e) => sort === "stars" ? e.stars : sort === "ai" ? e.ai : sort === "likely" ? e.likely?.point ?? -1 : e.total < 10 ? -1 : e.share ?? -1;
+    const rows = b.repos.filter((e) => (e.cohort ?? "top") === "tracked" === tracked).filter((e) => (!query || e.fullName.toLowerCase().includes(query)) && (!agent || (e.byAgent[agent] ?? 0) > 0)).sort((a, z) => key(z) - key(a) || z.stars - a.stars);
+    const shown = rows.slice(0, limit).map((e, i) => ({
+      rank: i + 1,
+      repo: e.fullName,
+      stars: e.stars,
+      aiSignedShare: e.share,
+      aiSigned: e.ai,
+      commits: e.total,
+      topAgent: e.top,
+      likely: e.likely ?? null,
+      measuredAt: e.measuredAt
+    }));
+    const text = [
+      `${rows.length} repos match; showing ${shown.length}, sorted by ${sort}. Board built ${b.generatedAt.slice(0, 16).replace("T", " ")} UTC, ${b.days}-day window.`,
+      ...shown.map((r) => `${r.rank}. ${r.repo}: ${formatShare(r.aiSigned, r.commits)} AI-signed (${r.aiSigned}/${r.commits})${r.likely ? `, likely ${formatRange(r.likely.lo, r.likely.hi)} (experimental)` : ""}`),
+      `Full list: ${SITE}/leaderboard/`
+    ];
+    return { text: text.join("\n"), structured: { generatedAt: b.generatedAt, days: b.days, matching: rows.length, rows: shown } };
+  }
+  function check(args) {
+    const commit = {
+      sha: "0000000",
+      message: str(args, "message", true),
+      date: (/* @__PURE__ */ new Date(0)).toISOString(),
+      url: "",
+      authorName: str(args, "author_name") ?? null,
+      authorEmail: str(args, "author_email") ?? null,
+      authorLogin: str(args, "author_login") ?? null,
+      parents: 1
+    };
+    const ignored = cls.isIgnoredCommit(commit);
+    const matches = ignored ? [] : cls.commit(commit);
+    const counted = matches.some((m) => m.confidence === "high");
+    const structured = {
+      ignored,
+      counted,
+      agent: counted ? matches[0].agentId : null,
+      matches: matches.map((m) => ({ agent: m.agentId, signal: m.signalId, kind: m.kind, confidence: m.confidence, matched: m.matched }))
+    };
+    const text = ignored ? "This author is a dependency or release bot; howmuchai leaves such commits out of all counts." : matches.length === 0 ? "No AI agent signature found. This does not mean the commit is human-written." : `${counted ? `Counts as AI-signed (${agentName(matches[0].agentId)}).` : "Only hints (medium confidence); not counted."}
+${matches.map((m) => `- ${agentName(m.agentId)} \xB7 ${m.signalId} \xB7 ${m.confidence}: ${m.matched}`).join("\n")}`;
+    return { text, structured };
+  }
+  function signatures(args) {
+    const agent = str(args, "agent");
+    const agents = registry.agents.filter((a) => !agent || a.id === agent);
+    if (agent && agents.length === 0) throw new ToolError(`Unknown agent "${agent.slice(0, 100)}"`);
+    const structured = {
+      registryVersion: registry.version,
+      agents: agents.map((a) => ({ id: a.id, name: a.name, signals: a.signals.map((s) => ({ id: s.id, kind: s.kind, pattern: s.pattern, counts: s.confidence === "high" })) }))
+    };
+    const text = structured.agents.map((a) => `${a.name} (${a.id}): ${a.signals.length ? a.signals.map((s) => `${s.kind}${s.counts ? "" : " (hint)"}`).join(", ") : "no known signature"}`).join("\n");
+    return { text: `Registry v${registry.version}
+${text}`, structured };
+  }
+  function toolResult(out, isError) {
+    return { content: [{ type: "text", text: out.text }], ...out.structured !== void 0 ? { structuredContent: out.structured } : {}, isError };
+  }
+  async function callTool(name, args) {
+    const tool = TOOLS.find((t) => t.name === name);
+    if (!tool) return null;
+    if (args !== void 0 && (typeof args !== "object" || args === null || Array.isArray(args))) return toolResult({ text: "Arguments must be an object" }, true);
+    const a = args ?? {};
+    try {
+      onlyKnown(a, tool);
+      const out = tool.name === "measure_repo" ? await measure(a) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
+      return toolResult(out, false);
+    } catch (e) {
+      if (e instanceof ToolError) return toolResult({ text: e.message }, true);
+      return toolResult({ text: `Unexpected error: ${redact(e instanceof Error ? e.message : String(e))}` }, true);
+    }
+  }
+  async function handle(msg) {
+    if (typeof msg !== "object" || msg === null || Array.isArray(msg)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
+    const m = msg;
+    const hasId = typeof m.id === "string" || typeof m.id === "number";
+    if (typeof m.method !== "string") {
+      if (hasId && ("result" in m || "error" in m)) return null;
+      return { jsonrpc: "2.0", id: hasId ? m.id : null, error: { code: -32600, message: "Invalid Request" } };
+    }
+    if (!hasId) return null;
+    const id = m.id;
+    const ok = (result) => ({ jsonrpc: "2.0", id, result });
+    const params = typeof m.params === "object" && m.params !== null && !Array.isArray(m.params) ? m.params : {};
+    switch (m.method) {
+      case "initialize": {
+        const asked = params.protocolVersion;
+        const version = typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0];
+        return ok({
+          protocolVersion: version,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE },
+          instructions: INSTRUCTIONS
+        });
+      }
+      case "ping":
+        return ok({});
+      case "tools/list":
+        return ok({ tools: TOOLS });
+      case "tools/call": {
+        const r = await callTool(params.name, params.arguments);
+        if (!r) return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown tool: ${String(params.name).slice(0, 100)}` } };
+        return ok(r);
+      }
+      default:
+        return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${m.method.slice(0, 100)}` } };
+    }
+  }
+  return { handle };
+}
+async function runStdio(deps = {}) {
+  const server = createServer(deps);
+  const write = (r) => {
+    if (r) process.stdout.write(JSON.stringify(r) + "\n");
+  };
+  const MAX_LINE = 4 * 1024 * 1024;
+  let buf = "";
+  let skipping = false;
+  const pending = /* @__PURE__ */ new Set();
+  process.stdin.setEncoding("utf8");
+  await new Promise((resolve) => {
+    process.stdin.on("data", (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (skipping) {
+          skipping = false;
+          continue;
+        }
+        if (!line) continue;
+        let msg;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+          continue;
+        }
+        const p = server.handle(msg).then(write).catch((e) => {
+          process.stderr.write(`howmuchai mcp: ${e instanceof Error ? e.message : String(e)}
+`);
+        }).finally(() => pending.delete(p));
+        pending.add(p);
+      }
+      if (buf.length > MAX_LINE) {
+        buf = "";
+        skipping = true;
+        write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Message too large" } });
+      }
+    });
+    process.stdin.on("end", resolve);
+  });
+  await Promise.all(pending);
 }
 
 // src/cli/index.ts
@@ -1316,6 +1850,7 @@ that carry an AI coding-agent signature (a lower bound of disclosed AI use).
 
 Usage
   npx howmuchai <owner/repo | github url> [options]
+  npx howmuchai mcp        run as an MCP server on stdio (for Claude, Cursor, VS Code)
 
 Options
   --days <n>       window in days (default ${DEFAULTS.days})
@@ -1382,15 +1917,15 @@ function render(r, evidence) {
   ];
   const b = r.beyond;
   if (b && r.commits.total > 0) {
-    const pc = (x) => `${Math.round(100 * x)}%`;
+    const pc2 = (x) => `${Math.round(100 * x)}%`;
     lines.push(`${c.bold("Beyond signatures")} ${c.dim("(experimental)")}`);
     if (b.estimate && b.likely) {
-      lines.push(`  likely ${c.bold(`${pc(b.likely.lo)}\u2013${pc(b.likely.hi)}`)} AI-involved, best estimate ${pc(b.likely.point)}`);
+      lines.push(`  likely ${c.bold(`${pc2(b.likely.lo)}\u2013${pc2(b.likely.hi)}`)} AI-involved, best estimate ${pc2(b.likely.point)}`);
       lines.push(c.dim(`  style estimate of ${b.estimate.judged ?? r.commits.total - r.commits.ai - b.estimate.tooShort} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge${b.estimate.bots ? `, ${b.estimate.bots} by bots left out` : ""}`));
     } else {
       lines.push(c.dim(`  no estimate: ${noEstimateReason(b.reason)}`));
     }
-    if (b.authors.aiAuthors) lines.push(`  ${pc(b.authors.commitsByAiAuthors / r.commits.total)} of commits by ${b.authors.aiAuthors}/${b.authors.authors} authors who disclose agent use here`);
+    if (b.authors.aiAuthors) lines.push(`  ${pc2(b.authors.commitsByAiAuthors / r.commits.total)} of commits by ${b.authors.aiAuthors}/${b.authors.authors} authors who disclose agent use here`);
     if (b.setup) lines.push(`  agent setup files: ${b.setup.length ? b.setup.map((s) => s.path).join(", ") : "none"}`);
     lines.push("");
   }
@@ -1408,6 +1943,15 @@ function render(r, evidence) {
 }
 async function main() {
   const args = process.argv.slice(2);
+  if (args[0] === "mcp") {
+    if (args.length > 1) {
+      process.stderr.write(`"howmuchai mcp" takes no options; set GITHUB_TOKEN in its environment.
+`);
+      process.exit(2);
+    }
+    await runStdio({ token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null });
+    return;
+  }
   if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
     process.stdout.write(HELP);
     return;

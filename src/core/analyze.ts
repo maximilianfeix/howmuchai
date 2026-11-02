@@ -8,7 +8,7 @@ import type { Beyond, CommitInput, Evidence, Match, MonthBucket, PullInput, Repo
 
 export const styleModel = modelJson as StyleModel;
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 export interface AnalyzeOptions {
   /** Also collect evidence beyond signatures (two to four extra requests). Default true. */
@@ -71,7 +71,44 @@ function count(sec: Section, b: MonthBucket, matches: Match[]): boolean {
   return true;
 }
 
-export function summarizeCommits(items: CommitInput[], cls: Classifier, evidenceLimit: number): Section {
+/** Most days between a squash commit and the merge of the pull request it names, when the merge sha is unknown. */
+const LINK_DAYS = 2;
+
+/**
+ * The merged pull request a commit was squash-merged from, or null. GitHub's squash commits end their subject
+ * with "(#123)". The link needs the pull request in the fetched list, merged, and either GitHub's merge sha
+ * equal to the commit or, for older raw data without that field, a merge within two days of the commit.
+ */
+export function linkedPull(c: CommitInput, pulls: Map<number, PullInput>): PullInput | null {
+  const m = /\(#(\d{1,9})\)\s*$/.exec(c.message.split("\n", 1)[0] ?? "");
+  if (!m) return null;
+  const p = pulls.get(Number(m[1]));
+  if (!p || !p.mergedAt) return null;
+  if (p.mergeCommitSha) return p.mergeCommitSha === c.sha ? p : null;
+  const dt = Math.abs(Date.parse(c.date) - Date.parse(p.mergedAt));
+  return Number.isFinite(dt) && dt <= LINK_DAYS * 86_400_000 ? p : null;
+}
+
+/**
+ * Matches of a commit: its own signatures, or, when it has no high-confidence one itself, the high-confidence
+ * signatures of the pull request it was squash-merged from (squash messages can drop the PR's footer).
+ */
+export function commitMatches(c: CommitInput, cls: Classifier, pulls: Map<number, PullInput>): { matches: Match[]; viaPull: number | null } {
+  const own = cls.commit(c);
+  if (own.some((m) => m.confidence === "high")) return { matches: own, viaPull: null };
+  const p = linkedPull(c, pulls);
+  if (p && !cls.isIgnoredPull(p)) {
+    const pm = cls.pull(p).filter((m) => m.confidence === "high");
+    if (pm.length) return { matches: [...pm, ...own], viaPull: p.number };
+  }
+  return { matches: own, viaPull: null };
+}
+
+export function pullIndex(pulls: PullInput[]): Map<number, PullInput> {
+  return new Map(pulls.map((p) => [p.number, p]));
+}
+
+export function summarizeCommits(items: CommitInput[], cls: Classifier, evidenceLimit: number, pulls: Map<number, PullInput> = new Map()): Section {
   const sec = emptySection();
   const months = new Map<string, MonthBucket>();
   sec.fetched = items.length;
@@ -81,9 +118,16 @@ export function summarizeCommits(items: CommitInput[], cls: Classifier, evidence
     if (!sec.oldest || c.date < sec.oldest) sec.oldest = c.date;
     const b = bucket(months, c.date);
     b.total++;
-    const matches = cls.commit(c);
+    const { matches, viaPull } = commitMatches(c, cls, pulls);
     if (!count(sec, b, matches)) continue;
-    if (sec.evidence.length < evidenceLimit) sec.evidence.push(toEvidence(matches[0]!, c.sha.slice(0, 7), firstLine(c.message), c.date, c.url));
+    if (sec.evidence.length < evidenceLimit) {
+      const e = toEvidence(matches[0]!, c.sha.slice(0, 7), firstLine(c.message), c.date, c.url);
+      if (viaPull !== null) {
+        e.viaPull = viaPull;
+        e.matched = `PR #${viaPull}: ${e.matched}`;
+      }
+      sec.evidence.push(e);
+    }
   }
   sec.byMonth = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
   return sec;
@@ -151,7 +195,8 @@ export async function fetchRepoData(input: string, opts: AnalyzeOptions = {}): P
     data.setup = await optional(() => client.agentSetup(repo.fullName));
     // The baseline costs one request; only fetch it when the gate can pass.
     const cls = createClassifier(registry);
-    const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && cls.commit(c).some((m) => m.confidence === "high")).length;
+    const prs = pullIndex(pulls.items);
+    const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && commitMatches(c, cls, prs).matches.some((m) => m.confidence === "high")).length;
     if (disclosed >= GATE_DISCLOSED) data.baseline = await optional(() => client.baseline(repo.fullName));
   }
   return data;
@@ -172,7 +217,8 @@ export const MIN_JUDGEABLE = 20;
 export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
   const items = d.commits.items.filter((c) => !cls.isIgnoredCommit(c));
   const signed = new Set<CommitInput>();
-  for (const c of items) if (cls.commit(c).some((m) => m.confidence === "high")) signed.add(c);
+  const prs = pullIndex(d.pulls.items);
+  for (const c of items) if (commitMatches(c, cls, prs).matches.some((m) => m.confidence === "high")) signed.add(c);
 
   // One identity per person: the login when known; an e-mail address maps to the login it was seen with.
   const loginByEmail = new Map<string, string>();
@@ -249,7 +295,7 @@ export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
 export function buildReport(d: RepoData, opts: { evidenceLimit?: number } = {}): Report {
   const evidenceLimit = opts.evidenceLimit ?? DEFAULTS.evidenceLimit;
   const cls = createClassifier(registry);
-  const cSec = summarizeCommits(d.commits.items, cls, evidenceLimit);
+  const cSec = summarizeCommits(d.commits.items, cls, evidenceLimit, pullIndex(d.pulls.items));
   cSec.capped = d.commits.capped;
   const pSec = summarizePulls(d.pulls.items, cls, evidenceLimit);
   pSec.capped = d.pulls.capped;
