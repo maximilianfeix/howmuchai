@@ -2,6 +2,8 @@ import type { CommitInput, Confidence, Match, PullInput, Registry, SignalKind } 
 
 interface CompiledSignal {
   agentId: string;
+  id: string;
+  contains: string | null;
   kind: SignalKind;
   re: RegExp;
   confidence: Confidence;
@@ -19,7 +21,7 @@ export function createClassifier(reg: Registry): Classifier {
   const signals: CompiledSignal[] = [];
   for (const agent of reg.agents) {
     for (const s of agent.signals) {
-      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "i"), confidence: s.confidence });
+      signals.push({ agentId: agent.id, id: s.id, contains: s.contains ?? null, kind: s.kind, re: new RegExp(s.pattern, "i"), confidence: s.confidence });
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
@@ -53,12 +55,14 @@ export function createClassifier(reg: Registry): Classifier {
 
   /** Tests line-based signals (trailers, footers) against each line on its own. */
   function runLines(list: CompiledSignal[], ls: string[], out: Match[], kind: "trailer" | "footer") {
-    const candidates = (kind === "trailer" ? ls.filter((l) => trailerShape.test(l)) : ls.filter((l) => /generated/i.test(l))).slice(-MAX_LINES);
+    const candidates = (kind === "trailer" ? ls.filter((l) => trailerShape.test(l)) : ls).slice(-MAX_LINES);
+    const lower = candidates.map((l) => l.toLowerCase());
     for (const s of list) {
-      for (const line of candidates) {
-        const m = s.re.exec(line);
+      for (let i = 0; i < candidates.length; i++) {
+        if (s.contains && !lower[i]!.includes(s.contains)) continue;
+        const m = s.re.exec(candidates[i]!);
         if (m) {
-          out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
+          out.push({ agentId: s.agentId, signalId: s.id, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
           break;
         }
       }
@@ -70,7 +74,7 @@ export function createClassifier(reg: Registry): Classifier {
     if (!value || value.length > MAX_FIELD) return;
     for (const s of list) {
       const m = s.re.exec(value);
-      if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
+      if (m) out.push({ agentId: s.agentId, signalId: s.id, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
     }
   }
 
