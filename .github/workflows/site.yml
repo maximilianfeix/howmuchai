@@ -39,7 +39,8 @@ jobs:
         run: npx tsx scripts/crawl.ts --data .data --max 100 --reserve 120 --concurrency 2
       - name: Save data
         if: github.event_name != 'push'
-        run: scripts/push-data.sh .data "data: $(date -u +%Y-%m-%dT%H:%MZ)"
+        run: |
+          scripts/push-data.sh .data "data: $(date -u +%Y-%m-%dT%H:%MZ)"
       - name: Build site
         run: npm run site
       - uses: actions/configure-pages@v5
