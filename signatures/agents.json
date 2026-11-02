@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "ignoredAuthors": [
     "dependabot[bot]",
     "dependabot-preview[bot]",
@@ -162,6 +162,28 @@
           "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*(?:github[ \\t]+)?copilot\\b[^\\n]{0,80}$",
           "confidence": "high",
           "contains": "assisted-by"
+        },
+        {
+          "id": "copilot/trailer-github",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*github copilot\\b[^<\\n]*<noreply@github\\.com>",
+          "confidence": "high",
+          "note": "\"GitHub Copilot <noreply@github.com>\" (block/aittributor and agents writing it)"
+        },
+        {
+          "id": "copilot/agent-logs",
+          "kind": "commit-trailer",
+          "pattern": "^agent-logs-url:[ \\t]*https://github\\.com/[^/\\s]+/[^/\\s]+/sessions/[0-9a-f-]{36}[ \\t]*$",
+          "confidence": "high",
+          "note": "Copilot coding agent links its session log in squash commits"
+        },
+        {
+          "id": "copilot/pr-agent-logs",
+          "kind": "pr-body",
+          "pattern": "https://github\\.com/[^/\\s]+/[^/\\s]+/sessions/[0-9a-f-]{36}",
+          "confidence": "medium",
+          "contains": "/sessions/",
+          "note": "Session link in a PR body (may also be pasted by a person)"
         }
       ]
     },
@@ -286,6 +308,20 @@
           "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*cursor\\b[^\\n]{0,80}$",
           "confidence": "high",
           "contains": "assisted-by"
+        },
+        {
+          "id": "cursor/made-with",
+          "kind": "commit-trailer",
+          "pattern": "^made-with:[ \\t]*cursor[ \\t]*$",
+          "confidence": "high",
+          "note": "Default trailer since 2026 (git commit --trailer \"Made-with: Cursor\"; Settings > Agents > Attribution)"
+        },
+        {
+          "id": "cursor/pr-made-with",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*made with \\[cursor\\]\\(https://cursor\\.com/?\\)[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "made with [cursor]"
         }
       ]
     },
@@ -345,6 +381,13 @@
           "kind": "pr-author",
           "pattern": "^google-labs-jules(?:\\[bot\\])?$",
           "confidence": "high"
+        },
+        {
+          "id": "jules/pr-footer",
+          "kind": "pr-body",
+          "pattern": "pr created automatically by jules for task \\[\\d{6,}\\]\\(https://jules\\.google\\.com/task/\\d{6,}\\)",
+          "confidence": "high",
+          "contains": "jules.google.com/task/"
         }
       ]
     },
@@ -497,19 +540,783 @@
       "id": "gemini",
       "name": "Gemini CLI",
       "color": "#7DA6E8",
-      "signals": []
+      "signals": [
+        {
+          "id": "gemini/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*(?:google[ \\t]+)?gemini[ \\t-]cli(?![\\w-]|[ \\t]+robot)[^<\\n]*<[^>\\n]+>",
+          "confidence": "high",
+          "note": "Gemini CLI named in a co-author trailer (no built-in default; written by the agent on request or by hooks such as block/aittributor)"
+        },
+        {
+          "id": "gemini/trailer-email",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:gemini-cli(?:-agent)?@google\\.com|gemini-cli\\+noreply@google\\.com)>",
+          "confidence": "high",
+          "note": "Gemini CLI e-mails: gemini-cli@google.com (shadow checkpoint author in gitService.ts), gemini-cli-agent@google.com (block/aittributor)"
+        },
+        {
+          "id": "gemini/trailer-bot-user",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:\\d+\\+)?gemini-cli@users\\.noreply\\.github\\.com>",
+          "confidence": "medium",
+          "note": "User gemini-cli (id 218195315, no profile metadata); written both as \"gemini-cli <...>\" and by Google Antigravity"
+        },
+        {
+          "id": "gemini/trailer-google",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*gemini\\b(?![^<\\n]*\\(agy\\))[^<\\n]*<(?:noreply|gemini)@google\\.com>",
+          "confidence": "medium",
+          "note": "\"Gemini <noreply@google.com>\" or \"Gemini 3.x Flash (agy) <noreply@google.com>\": a Gemini agent, but also used by Antigravity (agy)"
+        },
+        {
+          "id": "gemini/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:(?:🤖|🚀)[^\\S\\n]*)?generated (?:with|by) \\[?gemini[ -]cli\\]?(?:\\(<?https?://[^)\\s>]+>?\\))?[_*]{0,2}[^\\S\\n]*\\.?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "gemini"
+        },
+        {
+          "id": "gemini/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:(?:🤖|🚀)[^\\S\\n]*)?generated (?:with|by) \\[?gemini[ -]cli\\]?(?:\\(<?https?://[^)\\s>]+>?\\))?[_*]{0,2}[^\\S\\n]*\\.?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "gemini"
+        },
+        {
+          "id": "gemini/pr-author",
+          "kind": "pr-author",
+          "pattern": "^gemini-cli\\[bot\\]$",
+          "confidence": "high",
+          "note": "gemini-cli[bot] (run-gemini-cli automation; mostly google-gemini/* repos)"
+        },
+        {
+          "id": "gemini/pr-author-user",
+          "kind": "pr-author",
+          "pattern": "^gemini-cli$",
+          "confidence": "medium",
+          "note": "Account gemini-cli (id 218195315, no profile); also used by Google Antigravity"
+        }
+      ]
     },
     {
       "id": "windsurf",
       "name": "Windsurf",
       "color": "#5EC4C0",
-      "signals": []
+      "signals": [
+        {
+          "id": "windsurf/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:cascade@windsurf\\.ai|noreply@windsurf\\.com|(?:noreply|windsurf)@codeium\\.com)>",
+          "confidence": "high",
+          "note": "\"Windsurf Cascade <cascade@windsurf.ai>\", \"Cascade <noreply@codeium.com>\"; block/aittributor writes \"Windsurf <noreply@codeium.com>\""
+        },
+        {
+          "id": "windsurf/trailer-name",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*(?:windsurf(?:[ \\t]+cascade)?|cascade[ \\t]+\\(windsurf\\))\\b[^<\\n]*<[^>\\n]+>",
+          "confidence": "medium",
+          "note": "Windsurf with another address"
+        }
+      ]
     },
     {
       "id": "cline",
       "name": "Cline",
       "color": "#C7B26A",
-      "signals": []
+      "signals": [
+        {
+          "id": "cline/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:(?:noreply|cline)@cline\\.bot|cline@users\\.noreply\\.github\\.com|(?:\\d+\\+)?cline-cloud\\[bot\\]@users\\.noreply\\.github\\.com)>",
+          "confidence": "high",
+          "note": "\"Cline <noreply@cline.bot>\" (also block/aittributor), Cline Cloud app"
+        },
+        {
+          "id": "cline/author",
+          "kind": "commit-author",
+          "pattern": "^cline-cloud\\[bot\\]$|^(?:\\d+\\+)?cline-cloud\\[bot\\]@users\\.noreply\\.github\\.com$|^cline@users\\.noreply\\.github\\.com$",
+          "confidence": "high",
+          "note": "Cline Cloud commits as cline-cloud[bot] or \"Cline <cline@users.noreply.github.com>\" (org @cline)"
+        },
+        {
+          "id": "cline/pr-author",
+          "kind": "pr-author",
+          "pattern": "^cline-cloud(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "cline/pr-branch",
+          "kind": "pr-branch",
+          "pattern": "^cline/[^\\s]+$",
+          "confidence": "medium",
+          "note": "Cline Cloud branch prefix"
+        },
+        {
+          "id": "cline/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[cline\\]\\(https://cline\\.bot/?\\)[_*]{0,2}[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "cline.bot"
+        },
+        {
+          "id": "cline/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[cline\\]\\(https://cline\\.bot/?\\)[_*]{0,2}[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "cline.bot"
+        }
+      ]
+    },
+    {
+      "id": "roo",
+      "name": "Roo Code",
+      "color": "#A3C46E",
+      "signals": [
+        {
+          "id": "roo/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:roomote@(?:roocode\\.com|roomote\\.dev)|noreply@roocode\\.com|(?:\\d+\\+)?roomote(?:\\[bot\\])?@users\\.noreply\\.github\\.com)>",
+          "confidence": "high",
+          "note": "Roo Code Cloud \"Roo Code <roomote@roocode.com>\", Roomote \"Roomote <roomote@roomote.dev>\" (RooCodeInc/Roomote commit-author.ts)"
+        },
+        {
+          "id": "roo/author",
+          "kind": "commit-author",
+          "pattern": "^roomote\\[bot\\]$|^roomote@(?:roocode\\.com|roomote\\.dev)$|^(?:\\d+\\+)?roomote\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "high"
+        },
+        {
+          "id": "roo/pr-author",
+          "kind": "pr-author",
+          "pattern": "^roomote(?:\\[bot\\])?$",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Code",
+      "color": "#D9A05B",
+      "signals": [
+        {
+          "id": "kilo/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:noreply@kilo\\.ai|agent@kilocode\\.ai|(?:\\d+\\+)?(?:kilo-code-bot|kiloconnect)\\[bot\\]@users\\.noreply\\.github\\.com)>",
+          "confidence": "high"
+        },
+        {
+          "id": "kilo/trailer-name",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*kilo(?:[ \\t]+code(?:[ \\t]+cloud)?)?(?:[ \\t]+\\([^)\\n]{1,60}\\))?[ \\t]*<[^>\\n]+>",
+          "confidence": "medium",
+          "note": "\"Kilo <kilo@example.com>\" and similar"
+        },
+        {
+          "id": "kilo/author",
+          "kind": "commit-author",
+          "pattern": "^(?:kilo-code-bot|kiloconnect)\\[bot\\]$|^(?:\\d+\\+)?(?:kilo-code-bot|kiloconnect)\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "high",
+          "note": "App renamed kilo-code-bot -> kiloconnect, same id 240665456 (AGENT_USERNAME in github.handler.ts)"
+        },
+        {
+          "id": "kilo/pr-author",
+          "kind": "pr-author",
+          "pattern": "^(?:kilo-code-bot|kiloconnect)(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "kilo/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[kilo(?: code)?\\]\\(https://(?:kilo\\.ai|kilocode\\.ai)/?\\)[_*]{0,2}[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "kilo"
+        },
+        {
+          "id": "kilo/pr-slack",
+          "kind": "pr-body",
+          "pattern": "by \\[kilo for slack\\]\\(https://kilo\\.ai/slack\\)",
+          "confidence": "high",
+          "contains": "kilo.ai/slack"
+        }
+      ]
+    },
+    {
+      "id": "kiro",
+      "name": "Kiro",
+      "color": "#9CB4E0",
+      "signals": [
+        {
+          "id": "kiro/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-(?:authored|developed)-by:[^<\\n]*<(?:noreply@kiro\\.dev|(?:\\d+\\+)?kiro-agent(?:\\[bot\\])?@users\\.noreply\\.github\\.com)>",
+          "confidence": "high",
+          "note": "\"Kiro <noreply@kiro.dev>\" (IDE/CLI) and \"Kiro Agent <244629292+kiro-agent@users.noreply.github.com>\" (autonomous agent)"
+        },
+        {
+          "id": "kiro/author",
+          "kind": "commit-author",
+          "pattern": "^kiro-agent(?:\\[bot\\])?$|^(?:\\d+\\+)?kiro-agent(?:\\[bot\\])?@users\\.noreply\\.github\\.com$",
+          "confidence": "high"
+        },
+        {
+          "id": "kiro/pr-author",
+          "kind": "pr-author",
+          "pattern": "^kiro-agent(?:\\[bot\\])?$",
+          "confidence": "high",
+          "note": "Kiro Agent GitHub app (default PR author)"
+        },
+        {
+          "id": "kiro/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?kiro(?: cli| dev)?\\]?(?:[ \\t]*\\(<?https?://kiro\\.dev[^)\\s>]*>?\\))?[_*]{0,2}[^\\S\\n]*\\.?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "kiro"
+        },
+        {
+          "id": "kiro/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?kiro(?: cli| dev)?\\]?(?:[ \\t]*\\(<?https?://kiro\\.dev[^)\\s>]*>?\\))?[_*]{0,2}[^\\S\\n]*\\.?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "kiro"
+        }
+      ]
+    },
+    {
+      "id": "amazon-q",
+      "name": "Amazon Q Developer",
+      "color": "#E39A9A",
+      "signals": [
+        {
+          "id": "amazon-q/author",
+          "kind": "commit-author",
+          "pattern": "^amazon-q-developer\\[bot\\]$|^(?:\\d+\\+)?amazon-q-developer\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "high"
+        },
+        {
+          "id": "amazon-q/pr-author",
+          "kind": "pr-author",
+          "pattern": "^amazon-q-developer(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "amazon-q/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:\\d+\\+)?amazon-q-developer\\[bot\\]@users\\.noreply\\.github\\.com>|^co-authored-by:[ \\t]*amazon q developer\\b[^<\\n]*<[^>\\n]+>",
+          "confidence": "high"
+        },
+        {
+          "id": "amazon-q/pr-branch",
+          "kind": "pr-branch",
+          "pattern": "^Q-DEV-issue-\\d+-\\d{9,}$",
+          "confidence": "high",
+          "note": "Q-DEV-issue-<issue>-<epoch>"
+        }
+      ]
+    },
+    {
+      "id": "factory",
+      "name": "Factory Droid",
+      "color": "#7CC4D9",
+      "signals": [
+        {
+          "id": "factory/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:(?:\\d+\\+)?factory-droid(?:\\[bot\\])?@users\\.noreply\\.github\\.com|(?:droid|noreply|factory-droid)@factory\\.ai)>",
+          "confidence": "high",
+          "note": "\"factory-droid[bot] <138933559+...>\" (Droid GitHub app/Action) and \"Droid <droid@factory.ai>\" / \"Droid <noreply@factory.ai>\" (droid CLI)"
+        },
+        {
+          "id": "factory/trailer-name",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*(?:factory[ \\t]+)?droid(?![\\w-])[^<\\n]*<[^>\\n]+>",
+          "confidence": "medium",
+          "note": "\"Droid + Codex 5.6 Sol <...>\" etc.; excludes handles like droid-ash"
+        },
+        {
+          "id": "factory/author",
+          "kind": "commit-author",
+          "pattern": "^factory-droid\\[bot\\]$|^(?:\\d+\\+)?factory-droid\\[bot\\]@users\\.noreply\\.github\\.com$|^droid@factory\\.ai$|^factorydroid$",
+          "confidence": "high",
+          "note": "factorydroid = User account owned by @Factory-AI"
+        },
+        {
+          "id": "factory/pr-author",
+          "kind": "pr-author",
+          "pattern": "^factory-droid(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "factory/pr-trailer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*co-authored-by:[^<\\n]*<(?:\\d+\\+)?factory-droid(?:\\[bot\\])?@users\\.noreply\\.github\\.com>",
+          "confidence": "high",
+          "contains": "factory-droid"
+        }
+      ]
+    },
+    {
+      "id": "augment",
+      "name": "Augment Code",
+      "color": "#C79BD6",
+      "signals": [
+        {
+          "id": "augment/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:(?:noreply|agent|augment|bot|code)@augmentcode\\.com|(?:\\d+\\+)?(?:augmentcode|augment-app-staging)\\[bot\\]@users\\.noreply\\.github\\.com)>",
+          "confidence": "high"
+        },
+        {
+          "id": "augment/trailer-name",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*augment(?:[ \\t]+(?:agent|code|bot))?(?:[ \\t]+\\([^)\\n]{1,60}\\))?[ \\t]*<[^>\\n]+>",
+          "confidence": "medium"
+        },
+        {
+          "id": "augment/author",
+          "kind": "commit-author",
+          "pattern": "^augmentcode\\[bot\\]$|^(?:\\d+\\+)?augmentcode\\[bot\\]@users\\.noreply\\.github\\.com$|^agent@augmentcode\\.com$",
+          "confidence": "high"
+        },
+        {
+          "id": "augment/pr-author",
+          "kind": "pr-author",
+          "pattern": "^augmentcode(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "augment/pr-footer",
+          "kind": "pr-body",
+          "pattern": "pull request opened by \\[augment code\\]\\(https://(?:www\\.)?augmentcode\\.com/?\\)",
+          "confidence": "high",
+          "contains": "opened by [augment code]"
+        },
+        {
+          "id": "augment/pr-session",
+          "kind": "pr-body",
+          "pattern": "https://cosmos\\.augmentcode\\.com/session\\?[^\\s)]*agentid=[A-Za-z0-9]{8,}",
+          "confidence": "medium",
+          "contains": "cosmos.augmentcode.com/session",
+          "note": "A link to a session can also be pasted by a person, so it is a hint only."
+        }
+      ]
+    },
+    {
+      "id": "warp",
+      "name": "Warp / Oz",
+      "color": "#B8C27A",
+      "signals": [
+        {
+          "id": "warp/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:agent|oz-agent)@warp\\.dev>|^co-authored-by:[^<\\n]*<(?:\\d+\\+)?(?:warp-factories|oz-by-warp|warp-for-oss|oz-for-oss|warp-agent-staging)\\[bot\\]@users\\.noreply\\.github\\.com>",
+          "confidence": "high",
+          "note": "\"Warp <agent@warp.dev>\" (Agent Mode), \"Oz <oz-agent@warp.dev>\" (Oz cloud agents)"
+        },
+        {
+          "id": "warp/author",
+          "kind": "commit-author",
+          "pattern": "^(?:warp-agent|oz-agent)$|^(?:agent|oz-agent)@warp\\.dev$|^(?:warp-factories|oz-by-warp|warp-for-oss|warp-agent-staging)\\[bot\\]$|^(?:\\d+\\+)?(?:warp-factories|oz-by-warp|warp-for-oss|warp-agent-staging)\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "high",
+          "note": "warp-agent / oz-agent are User accounts with company Warp / @warpdotdev"
+        },
+        {
+          "id": "warp/pr-author",
+          "kind": "pr-author",
+          "pattern": "^(?:warp-factories|oz-by-warp|warp-for-oss)(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "warp/pr-footer",
+          "kind": "pr-body",
+          "pattern": "this pr was generated with \\[oz\\]\\(https://(?:www\\.)?warp\\.dev/oz/?\\)",
+          "confidence": "high",
+          "contains": "warp.dev/oz"
+        },
+        {
+          "id": "warp/pr-run",
+          "kind": "pr-body",
+          "pattern": "https://oz\\.warp\\.dev/runs/[0-9a-f-]{16,}",
+          "confidence": "medium",
+          "contains": "oz.warp.dev/runs/",
+          "note": "A link to a session can also be pasted by a person, so it is a hint only."
+        },
+        {
+          "id": "warp/pr-trailer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*co-authored-by:[^<\\n]*<(?:agent|oz-agent)@warp\\.dev>",
+          "confidence": "high",
+          "contains": "warp.dev"
+        },
+        {
+          "id": "warp/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?generated (?:with|by) \\[?warp(?: agent mode| code)?\\]?(?:\\(<?https?://(?:www\\.)?warp\\.dev[^)\\s>]*>?\\))?[_*]{0,2}[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "warp"
+        }
+      ]
+    },
+    {
+      "id": "goose",
+      "name": "goose",
+      "color": "#E0B48A",
+      "signals": [
+        {
+          "id": "goose/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*goose\\b[^<\\n]*<(?:(?:opensource|goose|noreply)@block\\.xyz|noreply@goose-docs\\.ai|goose@aaif\\.dev|noreply@aaif\\.org)>",
+          "confidence": "high",
+          "note": "block/aittributor writes \"Goose <opensource@block.xyz>\""
+        },
+        {
+          "id": "goose/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*[_*]{0,2}(?:🤖[^\\S\\n]*)?[_*]{0,2}generated (?:with|by) \\[goose\\]\\(https://github\\.com/block/goose/?\\)[_*]{0,2}[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "block/goose"
+        }
+      ]
+    },
+    {
+      "id": "crush",
+      "name": "Crush",
+      "color": "#8FCFB0",
+      "signals": [
+        {
+          "id": "crush/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*crush\\b[^<\\n]*<crush@charm\\.land>",
+          "confidence": "high",
+          "note": "trailer_style co-authored-by (bash.md.tpl:108)"
+        },
+        {
+          "id": "crush/assisted-by",
+          "kind": "commit-trailer",
+          "pattern": "^assisted-by:[ \\t]*crush(?::[^\\s]{1,80})?[ \\t]*$",
+          "confidence": "high",
+          "note": "Default trailer_style assisted-by: \"Assisted-by: Crush:<model>\" (config.go:442, bash.md.tpl:105)"
+        },
+        {
+          "id": "crush/trailer-name",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*crush(?::[^<\\s]{1,60})?(?![\\w-])[^<\\n]*<[^>\\n]+>",
+          "confidence": "medium"
+        },
+        {
+          "id": "crush/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*(?:💘|🤖)?[^\\S\\n]*generated with crush[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "generated with crush",
+          "note": "Default \"💘 Generated with Crush\" (generated_with default true)"
+        },
+        {
+          "id": "crush/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*(?:💘|🤖)?[^\\S\\n]*generated with crush[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "generated with crush"
+        }
+      ]
+    },
+    {
+      "id": "qwen-code",
+      "name": "Qwen Code",
+      "color": "#D6A3C4",
+      "signals": [
+        {
+          "id": "qwen-code/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*qwen-coder\\b[^<\\n]*<qwen-coder@alibaba(?:cloud)?\\.com>",
+          "confidence": "high",
+          "note": "Default gitCoAuthor (config.ts:3561, shell.ts:5510)"
+        },
+        {
+          "id": "qwen-code/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*(?:🤖[^\\S\\n]*)?generated with \\[?qwen code\\]?(?:\\(https://github\\.com/QwenLM/qwen-code/?\\))?(?:[ \\t]+\\(\\d+-shotted by [^)\\n]{1,60}\\))?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "qwen code"
+        },
+        {
+          "id": "qwen-code/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*(?:🤖[^\\S\\n]*)?generated with \\[?qwen code\\]?(?:\\(https://github\\.com/QwenLM/qwen-code/?\\))?(?:[ \\t]+\\(\\d+-shotted by [^)\\n]{1,60}\\))?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "qwen code",
+          "note": "PR attribution (shell.ts:5601)"
+        }
+      ]
+    },
+    {
+      "id": "trae",
+      "name": "TRAE",
+      "color": "#A8B8C8",
+      "signals": [
+        {
+          "id": "trae/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*trae(?:[ \\t]+cli)?\\b[^<\\n]*<(?:traecli|noreply)@bytedance\\.com>",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "cosine",
+      "name": "Cosine",
+      "color": "#CDB98A",
+      "signals": [
+        {
+          "id": "cosine/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:agent|genie)@cosine\\.sh>",
+          "confidence": "high",
+          "note": "\"Cosine <agent@cosine.sh>\", \"Cosine CLI (<model>) <agent@cosine.sh>\", \"Genie <genie@cosine.sh>\""
+        },
+        {
+          "id": "cosine/author",
+          "kind": "commit-author",
+          "pattern": "^(?:agent|genie)@cosine\\.sh$|^cosineai\\[bot\\]$",
+          "confidence": "high",
+          "note": "CosineGenie = User account with company @CosineAI"
+        },
+        {
+          "id": "cosine/pr-author",
+          "kind": "pr-author",
+          "pattern": "^cosineai(?:\\[bot\\])?$",
+          "confidence": "high"
+        },
+        {
+          "id": "cosine/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*this pr was automatically created by cosine\\.?[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "created by cosine"
+        }
+      ]
+    },
+    {
+      "id": "tembo",
+      "name": "Tembo",
+      "color": "#93B6A0",
+      "signals": [
+        {
+          "id": "tembo/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:(?:\\d+\\+)?tembo(?:-io|-local)?\\[bot\\]@users\\.noreply\\.github\\.com|agent@tembo\\.io)>",
+          "confidence": "high"
+        },
+        {
+          "id": "tembo/author",
+          "kind": "commit-author",
+          "pattern": "^tembo\\[bot\\]$|^(?:\\d+\\+)?tembo(?:-io)?\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "high"
+        },
+        {
+          "id": "tembo/pr-author",
+          "kind": "pr-author",
+          "pattern": "^tembo\\[bot\\]$",
+          "confidence": "high"
+        },
+        {
+          "id": "tembo/pr-branch",
+          "kind": "pr-branch",
+          "pattern": "^tembo/[^\\s]+$",
+          "confidence": "medium"
+        },
+        {
+          "id": "tembo/pr-session",
+          "kind": "pr-body",
+          "pattern": "https://app\\.tembo\\.io/sessions/[0-9a-f-]{16,}",
+          "confidence": "medium",
+          "contains": "app.tembo.io/sessions/",
+          "note": "A link to a session can also be pasted by a person, so it is a hint only."
+        }
+      ]
+    },
+    {
+      "id": "charlie",
+      "name": "Charlie Labs",
+      "color": "#E4A6C0",
+      "signals": [
+        {
+          "id": "charlie/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:charlie@charlielabs\\.ai|(?:\\d+\\+)?charliecreates\\[bot\\]@users\\.noreply\\.github\\.com)>",
+          "confidence": "high",
+          "note": "\"CharlieHelps <charlie@charlielabs.ai>\" and the CharlieCreates app"
+        },
+        {
+          "id": "charlie/author",
+          "kind": "commit-author",
+          "pattern": "^charliecreates\\[bot\\]$|^(?:\\d+\\+)?charliecreates\\[bot\\]@users\\.noreply\\.github\\.com$|^charlie@charlielabs\\.ai$",
+          "confidence": "high"
+        },
+        {
+          "id": "charlie/pr-author",
+          "kind": "pr-author",
+          "pattern": "^charliecreates(?:\\[bot\\])?$",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "lovable",
+      "name": "Lovable",
+      "color": "#9DA8E0",
+      "signals": [
+        {
+          "id": "lovable/author",
+          "kind": "commit-author",
+          "pattern": "^(?:lovable-dev|gpt-engineer-app)\\[bot\\]$|^(?:\\d+\\+)?(?:lovable-dev|gpt-engineer-app)\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "high",
+          "note": "Lovable GitHub sync; app id 159125892 (old name gpt-engineer-app)"
+        },
+        {
+          "id": "lovable/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<(?:(?:\\d+\\+)?(?:lovable-dev|gpt-engineer-app)\\[bot\\]@users\\.noreply\\.github\\.com|no-?reply@lovable\\.dev)>",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "v0",
+      "name": "v0",
+      "color": "#C4AE8F",
+      "signals": [
+        {
+          "id": "v0/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<it\\+v0agent@vercel\\.com>",
+          "confidence": "high"
+        },
+        {
+          "id": "v0/pr-session",
+          "kind": "pr-body",
+          "pattern": "\\[v0 session\\]\\(https://v0\\.(?:app|dev)/[^)\\s]*chat/[^)\\s]+\\)",
+          "confidence": "medium",
+          "contains": "v0 session",
+          "note": "A link to a session can also be pasted by a person, so it is a hint only."
+        }
+      ]
+    },
+    {
+      "id": "replit",
+      "name": "Replit Agent",
+      "color": "#86BFD0",
+      "signals": [
+        {
+          "id": "replit/author",
+          "kind": "commit-author",
+          "pattern": "^replit-agent$|^agent@replit\\.com$",
+          "confidence": "high",
+          "note": "Replit Agent commits (User replit-agent, company Replit)"
+        },
+        {
+          "id": "replit/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*replit agent\\b[^<\\n]*<[^>\\n]+>|^co-authored-by:[^<\\n]*<(?:agent@replit\\.com|(?:\\d+\\+)?replit-agent@users\\.noreply\\.github\\.com|(?:\\d+\\+)?replit\\[bot\\]@users\\.noreply\\.github\\.com)>",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "continue",
+      "name": "Continue",
+      "color": "#D2C07A",
+      "signals": [
+        {
+          "id": "continue/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*continue\\b[^<\\n]*<noreply@continue\\.dev>",
+          "confidence": "high",
+          "note": "Continue CLI system prompt (systemMessage.ts:225-227)"
+        },
+        {
+          "id": "continue/footer",
+          "kind": "commit-message",
+          "pattern": "^[^\\S\\n]*generated with \\[continue\\]\\(https://continue\\.dev/?\\)[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "continue.dev"
+        },
+        {
+          "id": "continue/pr-footer",
+          "kind": "pr-body",
+          "pattern": "^[^\\S\\n]*generated with \\[continue\\]\\(https://continue\\.dev/?\\)[^\\S\\n]*$",
+          "confidence": "high",
+          "contains": "continue.dev"
+        },
+        {
+          "id": "continue/author",
+          "kind": "commit-author",
+          "pattern": "^continue\\[bot\\]$|^(?:\\d+\\+)?continue\\[bot\\]@users\\.noreply\\.github\\.com$",
+          "confidence": "medium",
+          "note": "many continue[bot] PRs only add Continue Hub check files"
+        },
+        {
+          "id": "continue/pr-author",
+          "kind": "pr-author",
+          "pattern": "^continue\\[bot\\]$",
+          "confidence": "medium"
+        }
+      ]
+    },
+    {
+      "id": "pi",
+      "name": "pi",
+      "color": "#B49FCF",
+      "signals": [
+        {
+          "id": "pi/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*<noreply@pi\\.dev>",
+          "confidence": "high",
+          "note": "pi coding agent (pi.dev); the name is often the model (\"GPT-5.6 Sol <noreply@pi.dev>\")"
+        },
+        {
+          "id": "pi/generated-by",
+          "kind": "commit-trailer",
+          "pattern": "^generated-by:[ \\t]*pi[ \\t]+\\d+\\.\\d+(?:\\.\\d+)?[ \\t]*\\(https://pi\\.dev/?\\)",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "antigravity",
+      "name": "Google Antigravity",
+      "color": "#A6C9A0",
+      "signals": [
+        {
+          "id": "antigravity/trailer",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[ \\t]*google[ \\t]+antigravity\\b[^<\\n]*<[^>\\n]+>|^co-authored-by:[^<\\n]*<(?:\\d+\\+)?google-antigravity@users\\.noreply\\.github\\.com>",
+          "confidence": "high",
+          "note": "Google Antigravity (agent IDE / agy CLI)"
+        },
+        {
+          "id": "antigravity/trailer-agy",
+          "kind": "commit-trailer",
+          "pattern": "^co-authored-by:[^<\\n]*\\(agy\\)[^<\\n]*<[^>\\n]*@google\\.com>",
+          "confidence": "high",
+          "note": "\"Gemini 3.8 Flash (agy) <noreply@google.com>\""
+        }
+      ]
+    },
+    {
+      "id": "entire",
+      "name": "Entire (agent unspecified)",
+      "color": "#E0A882",
+      "signals": [
+        {
+          "id": "entire/checkpoint",
+          "kind": "commit-trailer",
+          "pattern": "^entire-checkpoint:[ \\t]*[0-9a-z]{12,32}[ \\t]*$",
+          "confidence": "high",
+          "note": "Entire (entire.io) records an agent session per commit and links it with this trailer; the agent itself is not named"
+        }
+      ]
     }
   ]
 }
