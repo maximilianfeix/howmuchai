@@ -10,6 +10,8 @@ export type SignalKind =
 export type Confidence = "high" | "medium";
 
 export interface Signal {
+  /** Stable id, "<agent>/<name>". */
+  id: string;
   kind: SignalKind;
   /** JavaScript regular expression source, matched case-insensitively. */
   pattern: string;
