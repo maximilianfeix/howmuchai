@@ -199,13 +199,16 @@ export function createServer(deps: ServerDeps = {}) {
   const SERVER_INFO = { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE };
   /** Requests in flight, by id, so notifications/cancelled can stop them. */
   const inflight = new Map<string | number, AbortController>();
+  /** At most this many tool calls run at once; a client that sends more gets an error instead of unbounded work. */
+  const MAX_INFLIGHT = 16;
   const cls = createClassifier(registry);
   let board: Promise<Board> | null = null;
   let boardAt = 0;
   const redact = (s: string) => (token ? s.split(token).join("***") : s);
 
-  async function getJson(path: string): Promise<unknown | null> {
-    const res = await doFetch(`${SITE}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+  async function getJson(path: string, signal?: AbortSignal): Promise<unknown | null> {
+    const timeout = AbortSignal.timeout(20_000);
+    const res = await doFetch(`${SITE}/${path}`, { headers: { accept: "application/json" }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (res.status === 404) return null;
     if (!res.ok) throw new ToolError(`The howmuchai site answered ${res.status} for ${path}`);
     return res.json();
@@ -236,7 +239,10 @@ export function createServer(deps: ServerDeps = {}) {
     const days = int(args, "days", DEFAULTS.days, 1, 365);
     const evidence = int(args, "evidence", 5, 0, 50);
     if (!live && days === DEFAULTS.days) {
-      const stored = await getJson(reportPath(repo)).catch(() => null);
+      const stored = await getJson(reportPath(repo), signal).catch((e) => {
+        if (signal?.aborted) throw e;
+        return null;
+      });
       const v = stored ? validateReport(stored) : null;
       if (v?.ok) return summarize(v.value, evidence, "stored");
     }
@@ -250,7 +256,18 @@ export function createServer(deps: ServerDeps = {}) {
     }
   }
 
-  async function leaderboard(args: Record<string, unknown>) {
+  /** Resolves like p, or rejects as soon as the request is cancelled (p itself may be shared and keeps running). */
+  function untilAborted<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) return p;
+    if (signal.aborted) return Promise.reject(new Error("cancelled"));
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => reject(new Error("cancelled"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  }
+
+  async function leaderboard(args: Record<string, unknown>, signal?: AbortSignal) {
     const sort = str(args, "sort") ?? "share";
     if (!["share", "stars", "ai", "likely"].includes(sort)) throw new ToolError('"sort" must be share, stars, ai or likely');
     const agent = str(args, "agent");
@@ -258,7 +275,7 @@ export function createServer(deps: ServerDeps = {}) {
     const query = str(args, "query")?.toLowerCase();
     const limit = int(args, "limit", 20, 1, 100);
     const tracked = bool(args, "tracked");
-    const b = await loadBoard();
+    const b = await untilAborted(loadBoard(), signal);
     const key = (e: BoardEntry) => (sort === "stars" ? e.stars : sort === "ai" ? e.ai : sort === "likely" ? (e.likely?.point ?? -1) : e.total < 10 ? -1 : (e.share ?? -1));
     const rows = b.repos
       .filter((e) => ((e.cohort ?? "top") === "tracked") === tracked)
@@ -330,13 +347,14 @@ export function createServer(deps: ServerDeps = {}) {
   }
 
   async function callTool(name: unknown, args: unknown, signal?: AbortSignal) {
+    if (typeof name !== "string") return null;
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) return null;
     if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) return toolResult({ text: "Arguments must be an object" }, true);
     const a = (args ?? {}) as Record<string, unknown>;
     try {
       onlyKnown(a, tool);
-      const out = tool.name === "measure_repo" ? await measure(a, signal) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
+      const out = tool.name === "measure_repo" ? await measure(a, signal) : tool.name === "leaderboard" ? await leaderboard(a, signal) : tool.name === "check_commit" ? check(a) : signatures(a);
       return toolResult(out, false);
     } catch (e) {
       if (e instanceof ToolError) return toolResult({ text: e.message }, true);
@@ -390,12 +408,14 @@ export function createServer(deps: ServerDeps = {}) {
       case "tools/list":
         return ok({ tools: TOOLS }, true);
       case "tools/call": {
+        if (inflight.size >= MAX_INFLIGHT) return fail(-32603, `Server busy: more than ${MAX_INFLIGHT} tool calls at once`);
+        if (inflight.has(id)) return fail(-32600, "Invalid Request: id already in use");
         const ctrl = new AbortController();
         inflight.set(id, ctrl);
         try {
           const r = await callTool(params.name, params.arguments, ctrl.signal);
           if (ctrl.signal.aborted) return null;
-          if (!r) return fail(-32602, `Unknown tool: ${String(params.name).slice(0, 100)}`);
+          if (!r) return fail(-32602, typeof params.name === "string" ? `Unknown tool: ${params.name.slice(0, 100)}` : "Invalid params: name must be a string");
           return ok(r);
         } finally {
           inflight.delete(id);
@@ -412,8 +432,13 @@ export function createServer(deps: ServerDeps = {}) {
 /** Runs the server on stdin/stdout until stdin closes. */
 export async function runStdio(deps: ServerDeps = {}): Promise<void> {
   const server = createServer(deps);
+  // Backpressure: stop reading requests while the client is not reading answers.
   const write = (r: Response | null) => {
-    if (r) process.stdout.write(JSON.stringify(r) + "\n");
+    if (!r) return;
+    if (!process.stdout.write(JSON.stringify(r) + "\n")) {
+      process.stdin.pause();
+      process.stdout.once("drain", () => process.stdin.resume());
+    }
   };
   const MAX_LINE = 4 * 1024 * 1024;
   let buf = "";
@@ -440,11 +465,14 @@ export async function runStdio(deps: ServerDeps = {}): Promise<void> {
           continue;
         }
         // Requests run concurrently; each answers when done, matched by id.
+        const reqId = typeof msg === "object" && msg !== null && "method" in msg && "id" in msg ? (msg as { id: unknown }).id : undefined;
         const p: Promise<void> = server
           .handle(msg)
           .then(write)
           .catch((e) => {
             process.stderr.write(`howmuchai mcp: ${e instanceof Error ? e.message : String(e)}\n`);
+            // The client waits for an answer to every request; never leave one unanswered.
+            if (typeof reqId === "string" || typeof reqId === "number") write({ jsonrpc: "2.0", id: reqId, error: { code: -32603, message: "Internal error" } });
           })
           .finally(() => pending.delete(p));
         pending.add(p);

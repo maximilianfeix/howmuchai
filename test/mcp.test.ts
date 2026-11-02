@@ -177,6 +177,47 @@ describe("MCP server, modern protocol (2026-07-28)", () => {
   });
 });
 
+describe("MCP server, review 4", () => {
+  it("answers a non-string tool name with -32602", async () => {
+    const s = createServer({ fetch: fakeFetch({}).f });
+    const r = (await s.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: { toString: null } } }))!;
+    expect(r.error!.code).toBe(-32602);
+  });
+
+  it("refuses more than 16 tool calls at once", async () => {
+    const never = (() => new Promise(() => {})) as unknown as typeof fetch;
+    const s = createServer({ fetch: never });
+    for (let i = 0; i < 16; i++) void s.handle(call("leaderboard", {}, i));
+    await new Promise((r) => setTimeout(r, 5));
+    const r = (await s.handle(call("leaderboard", {}, 99)))!;
+    expect(r.error!.code).toBe(-32603);
+    expect(r.error!.message).toMatch(/busy/);
+  });
+
+  it("cancels a stalled leaderboard request and sends nothing for it", async () => {
+    const never = (() => new Promise(() => {})) as unknown as typeof fetch;
+    const s = createServer({ fetch: never });
+    const pending = s.handle(call("leaderboard", {}, 5));
+    await new Promise((r) => setTimeout(r, 5));
+    await s.handle({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 5 } });
+    expect(await pending).toBeNull();
+  });
+
+  it("passes the cancel signal to the stored-report fetch", async () => {
+    let seen: AbortSignal | undefined;
+    const f = ((_: string, init?: RequestInit) => {
+      seen = init?.signal ?? undefined;
+      return new Promise((_, rej) => seen!.addEventListener("abort", () => rej(new Error("aborted"))));
+    }) as unknown as typeof fetch;
+    const s = createServer({ fetch: f });
+    const pending = s.handle(call("measure_repo", { repo: "o/r" }, 6));
+    await new Promise((r) => setTimeout(r, 5));
+    await s.handle({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 6 } });
+    expect(seen?.aborted).toBe(true);
+    expect(await pending).toBeNull();
+  });
+});
+
 describe.skipIf(!existsSync("dist/cli.mjs"))("MCP over stdio (built CLI)", () => {
   it("speaks newline-delimited JSON-RPC and keeps stdout clean", async () => {
     const child = spawn(process.execPath, ["dist/cli.mjs", "mcp"], { stdio: ["pipe", "pipe", "pipe"] });

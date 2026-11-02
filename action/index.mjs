@@ -1126,15 +1126,9 @@ function count(sec, b, matches) {
   }
   return true;
 }
-var LINK_DAYS = 2;
 function linkedPull(c, pulls) {
-  const m = /\(#(\d{1,9})\)\s*$/.exec(c.message.split("\n", 1)[0] ?? "");
-  if (!m) return null;
-  const p = pulls.get(Number(m[1]));
-  if (!p || !p.mergedAt) return null;
-  if (p.mergeCommitSha) return p.mergeCommitSha === c.sha ? p : null;
-  const dt = Math.abs(Date.parse(c.date) - Date.parse(p.mergedAt));
-  return Number.isFinite(dt) && dt <= LINK_DAYS * 864e5 ? p : null;
+  const p = pulls.bySha.get(c.sha);
+  return p && p.mergedAt ? p : null;
 }
 function commitMatches(c, cls, pulls) {
   const own = cls.commit(c);
@@ -1147,9 +1141,11 @@ function commitMatches(c, cls, pulls) {
   return { matches: own, viaPull: null };
 }
 function pullIndex(pulls) {
-  return new Map(pulls.map((p) => [p.number, p]));
+  const bySha = /* @__PURE__ */ new Map();
+  for (const p of pulls) if (p.mergedAt && p.mergeCommitSha) bySha.set(p.mergeCommitSha, p);
+  return { byNumber: new Map(pulls.map((p) => [p.number, p])), bySha };
 }
-function summarizeCommits(items, cls, evidenceLimit, pulls = /* @__PURE__ */ new Map()) {
+function summarizeCommits(items, cls, evidenceLimit, pulls = pullIndex([])) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
   sec.fetched = items.length;
