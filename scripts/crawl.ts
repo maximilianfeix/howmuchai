@@ -18,6 +18,7 @@ import { badgePath, likelyBadgePath, buildBoard, cardPath, reportPath, toEntry, 
 import { GitHubClient, GitHubError } from "../src/core/github";
 import { renderBadge, renderCard, renderLikelyBadge, shieldsJson } from "../src/core/render";
 import { validateBoard, validateRepoData, validateReport } from "../src/core/validate";
+import { buildStats, isStats, type Stats } from "../src/core/stats";
 import { writeAtomic } from "./lib/fsutil";
 import { REPORT_SCHEMA, type Report } from "../src/core/types";
 
@@ -233,6 +234,7 @@ async function main() {
 
   // leaderboard from every stored report that is selected or tracked; statistics use the top cohort only
   const entries: BoardEntry[] = [];
+  const reports: Report[] = [];
   const listed = new Set(all.map((r) => r.toLowerCase()));
   const reposDir = join(DATA, "data/repos");
   if (existsSync(reposDir)) {
@@ -240,7 +242,10 @@ async function main() {
       for (const f of readdirSync(join(reposDir, owner))) {
         const name = `${owner}/${f.replace(/\.json$/, "")}`;
         const rep = storedReport(name);
-        if (rep) entries.push(toEntry(rep));
+        if (rep) {
+          entries.push(toEntry(rep));
+          reports.push(rep);
+        }
         else if (existsSync(join(DATA, reportPath(name))) && !listed.has(name.toLowerCase())) quarantine(reportPath(name), "old schema, no longer selected or tracked");
       }
     }
@@ -248,6 +253,17 @@ async function main() {
   const board: Board = buildBoard(entries, top.top, tracked.repos, top.generatedAt, DEFAULTS.days, new Date());
   const vb = validateBoard(board);
   if (!vb.ok) throw new Error(`refusing to write an invalid leaderboard: ${vb.errors.join("; ")}`);
+  // Statistics keep their daily history across crawls.
+  let prevStats: Stats["history"] = [];
+  try {
+    const prev = readJson<unknown>("data/stats.json", null);
+    if (isStats(prev)) prevStats = prev.history;
+  } catch {
+    // unreadable statistics only cost the history, never the crawl
+  }
+  const stats = buildStats(reports, board.repos, new Date(), prevStats);
+  if (!isStats(stats)) throw new Error("refusing to write invalid statistics");
+  writeFile("data/stats.json", JSON.stringify(stats) + "\n");
   // Written last, so that the board only ever points at reports that exist.
   writeFile("data/leaderboard.json", JSON.stringify(board) + "\n");
   console.log(`measured ${done}, leaderboard has ${board.repos.length} repos (top cohort ${board.cohort?.measured}/${board.cohort?.selected}), ${client.requests} requests, ${client.lastRate?.remaining ?? "?"} left`);

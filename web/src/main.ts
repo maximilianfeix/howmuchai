@@ -7,6 +7,7 @@ import { agentColor, agentName, registry } from "../../src/core/registry";
 import { coverageLabel, periodLabel, renderCard } from "../../src/core/render";
 import type { Report, Section } from "../../src/core/types";
 import { validateBoard, validateReport } from "../../src/core/validate";
+import { isStats, type Stats } from "../../src/core/stats";
 
 const BASE = import.meta.env.BASE_URL; // "/howmuchai/" or "/"
 const SITE = __SITE__; // absolute site URL without trailing slash
@@ -517,6 +518,7 @@ async function renderLeaderboard(g: number) {
         .map(([id, n]) => `<div style="display:flex;justify-content:space-between;font-size:14px"><span><span class="sw" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${agentColor(id)}"></span> ${esc(agentName(id))}</span><span class="mono">${n}</span></div>`)
         .join("")}</div>
     </div>
+    <div id="lb-more"></div>
     <div class="lb-controls">
       <input id="lb-q" placeholder="Filter repos" aria-label="Filter repositories" />
       <div class="seg" role="group" aria-label="Sort">
@@ -535,6 +537,10 @@ async function renderLeaderboard(g: number) {
     <div id="lb-table"></div>
     <p class="muted" style="font-size:14px">Repos with fewer than 10 commits in the window are listed last. Ask to <a href="https://github.com/maximilianfeix/howmuchai/issues/new?template=track-repo.yml">track another repo</a>.</p>
   `;
+  void loadStats().then((s) => {
+    const el = document.getElementById("lb-more");
+    if (s && el && current(g)) el.innerHTML = statsHtml(s);
+  });
   let sort = "share";
   let showTracked = false;
   const draw = () => {
@@ -561,6 +567,62 @@ async function renderLeaderboard(g: number) {
     draw();
   });
   draw();
+}
+
+// ---------- statistics ----------
+
+async function loadStats(): Promise<Stats | null> {
+  try {
+    const res = await fetch(url("data/stats.json"));
+    if (!res.ok) return null;
+    const v: unknown = await res.json();
+    return isStats(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthName = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1] ?? m} ${m.slice(0, 4)}`;
+
+/** Monthly AI-signed share as single-series bars with direct labels, plus the language table. */
+function statsHtml(s: Stats): string {
+  const months = s.trend.months.filter((m) => m.total > 0);
+  let trend = "";
+  if (months.length >= 2) {
+    const W = 560, H = 170, top = 22, bottom = 28, gap = 18;
+    const max = Math.max(...months.map((m) => m.ai / m.total), 0.01);
+    const bw = (W - gap * (months.length - 1)) / months.length;
+    const bars = months
+      .map((m, i) => {
+        const share = m.ai / m.total;
+        const h = Math.max(2, (share / max) * (H - top - bottom));
+        const x = i * (bw + gap), y = H - bottom - h;
+        const label = `${monthName(m.month)}${m.partial ? " (part of the month)" : ""}: ${formatShare(m.ai, m.total)} AI-signed, ${m.ai.toLocaleString("en-US")} of ${m.total.toLocaleString("en-US")} commits`;
+        return `<g class="tbar" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title>
+          <rect x="${x.toFixed(1)}" y="${top}" width="${bw.toFixed(1)}" height="${H - top - bottom}" fill="transparent"/>
+          <path d="M${x.toFixed(1)} ${(H - bottom).toFixed(1)}V${(y + 4).toFixed(1)}q0 -4 4 -4h${(bw - 8).toFixed(1)}q4 0 4 4V${(H - bottom).toFixed(1)}Z" fill="var(--accent)" ${m.partial ? 'fill-opacity="0.55"' : ""}/>
+          <text x="${(x + bw / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" text-anchor="middle" class="tval">${formatShare(m.ai, m.total)}</text>
+          <text x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="tlab">${esc(monthName(m.month))}${m.partial ? "*" : ""}</text></g>`;
+      })
+      .join("");
+    trend = html`<div class="card month-trend"><h2 style="margin-top:0">AI-signed share by month</h2>
+      <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="AI-signed share of commits by month">${bars}<line x1="0" x2="${W}" y1="${H - bottom}" y2="${H - bottom}" stroke="var(--border)"/></svg>
+      <p class="muted" style="font-size:13px;margin:6px 0 0">The ${s.trend.repos.toLocaleString("en-US")} repos of the top cohort whose whole ${"90"}-day window was read, so every month has the same repos. * Part of the month only; months with less than a week in the window are left out. Disclosed signatures, a lower bound.</p>
+      <details><summary>Table</summary><table class="lb"><thead><tr><th>Month</th><th class="num">AI-signed</th><th class="num">Commits</th></tr></thead><tbody>${months
+        .map((m) => `<tr><td>${esc(monthName(m.month))}${m.partial ? " (part)" : ""}</td><td class="num">${formatShare(m.ai, m.total)}</td><td class="num muted">${m.total.toLocaleString("en-US")}</td></tr>`)
+        .join("")}</tbody></table></details></div>`;
+  }
+  const langs = s.languages.filter((l) => l.commits > 0);
+  const lang = langs.length
+    ? html`<div class="card"><h2 style="margin-top:0">By language</h2><table class="lb"><thead><tr><th>Language</th><th class="num">AI-signed commits</th><th class="num hide-sm">Repos with any</th><th class="num hide-sm">Median repo</th><th class="num hide-sm">Repos</th></tr></thead><tbody>${langs
+        .map(
+          (l) =>
+            `<tr><td>${esc(l.language)}</td><td class="num">${formatShare(l.ai, l.commits)}</td><td class="num hide-sm muted">${formatShare(l.withAi, l.repos)}</td><td class="num hide-sm muted">${(100 * l.medianShare).toFixed(1)}%</td><td class="num hide-sm muted">${l.repos}</td></tr>`,
+        )
+        .join("")}</tbody></table><p class="muted" style="font-size:13px;margin:6px 0 0">GitHub's main language of each repo; languages with fewer than 15 repos are under Other.</p></div>`
+    : "";
+  return `<div class="lb-more">${trend}${lang}</div>`;
 }
 
 // ---------- method ----------
