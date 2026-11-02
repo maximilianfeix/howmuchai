@@ -1123,15 +1123,9 @@ function count(sec, b, matches) {
   }
   return true;
 }
-var LINK_DAYS = 2;
 function linkedPull(c2, pulls) {
-  const m = /\(#(\d{1,9})\)\s*$/.exec(c2.message.split("\n", 1)[0] ?? "");
-  if (!m) return null;
-  const p = pulls.get(Number(m[1]));
-  if (!p || !p.mergedAt) return null;
-  if (p.mergeCommitSha) return p.mergeCommitSha === c2.sha ? p : null;
-  const dt = Math.abs(Date.parse(c2.date) - Date.parse(p.mergedAt));
-  return Number.isFinite(dt) && dt <= LINK_DAYS * 864e5 ? p : null;
+  const p = pulls.bySha.get(c2.sha);
+  return p && p.mergedAt ? p : null;
 }
 function commitMatches(c2, cls, pulls) {
   const own = cls.commit(c2);
@@ -1144,9 +1138,11 @@ function commitMatches(c2, cls, pulls) {
   return { matches: own, viaPull: null };
 }
 function pullIndex(pulls) {
-  return new Map(pulls.map((p) => [p.number, p]));
+  const bySha = /* @__PURE__ */ new Map();
+  for (const p of pulls) if (p.mergedAt && p.mergeCommitSha) bySha.set(p.mergeCommitSha, p);
+  return { byNumber: new Map(pulls.map((p) => [p.number, p])), bySha };
 }
-function summarizeCommits(items, cls, evidenceLimit, pulls = /* @__PURE__ */ new Map()) {
+function summarizeCommits(items, cls, evidenceLimit, pulls = pullIndex([])) {
   const sec = emptySection();
   const months = /* @__PURE__ */ new Map();
   sec.fetched = items.length;
@@ -1637,12 +1633,14 @@ function createServer(deps = {}) {
   const github = deps.github ?? ((signal) => new GitHubClient({ token, userAgent: `howmuchai-mcp/${VERSION}`, attempts: 3, maxWaitMs: 3e4, timeoutMs: 3e4, signal }));
   const SERVER_INFO = { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE };
   const inflight = /* @__PURE__ */ new Map();
+  const MAX_INFLIGHT = 16;
   const cls = createClassifier(registry);
   let board = null;
   let boardAt = 0;
   const redact = (s) => token ? s.split(token).join("***") : s;
-  async function getJson(path) {
-    const res = await doFetch(`${SITE}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(2e4) });
+  async function getJson(path, signal) {
+    const timeout = AbortSignal.timeout(2e4);
+    const res = await doFetch(`${SITE}/${path}`, { headers: { accept: "application/json" }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (res.status === 404) return null;
     if (!res.ok) throw new ToolError(`The howmuchai site answered ${res.status} for ${path}`);
     return res.json();
@@ -1670,7 +1668,10 @@ function createServer(deps = {}) {
     const days = int(args, "days", DEFAULTS.days, 1, 365);
     const evidence = int(args, "evidence", 5, 0, 50);
     if (!live && days === DEFAULTS.days) {
-      const stored = await getJson(reportPath(repo)).catch(() => null);
+      const stored = await getJson(reportPath(repo), signal).catch((e) => {
+        if (signal?.aborted) throw e;
+        return null;
+      });
       const v = stored ? validateReport(stored) : null;
       if (v?.ok) return summarize(v.value, evidence, "stored");
     }
@@ -1683,7 +1684,16 @@ function createServer(deps = {}) {
       throw new ToolError(`Could not measure ${repo}: ${redact(e instanceof Error ? e.message : String(e))}`);
     }
   }
-  async function leaderboard(args) {
+  function untilAborted(p, signal) {
+    if (!signal) return p;
+    if (signal.aborted) return Promise.reject(new Error("cancelled"));
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(new Error("cancelled"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  }
+  async function leaderboard(args, signal) {
     const sort = str(args, "sort") ?? "share";
     if (!["share", "stars", "ai", "likely"].includes(sort)) throw new ToolError('"sort" must be share, stars, ai or likely');
     const agent = str(args, "agent");
@@ -1691,7 +1701,7 @@ function createServer(deps = {}) {
     const query = str(args, "query")?.toLowerCase();
     const limit = int(args, "limit", 20, 1, 100);
     const tracked = bool(args, "tracked");
-    const b = await loadBoard();
+    const b = await untilAborted(loadBoard(), signal);
     const key = (e) => sort === "stars" ? e.stars : sort === "ai" ? e.ai : sort === "likely" ? e.likely?.point ?? -1 : e.total < 10 ? -1 : e.share ?? -1;
     const rows = b.repos.filter((e) => (e.cohort ?? "top") === "tracked" === tracked).filter((e) => (!query || e.fullName.toLowerCase().includes(query)) && (!agent || (e.byAgent[agent] ?? 0) > 0)).sort((a, z) => key(z) - key(a) || z.stars - a.stars);
     const shown = rows.slice(0, limit).map((e, i) => ({
@@ -1752,13 +1762,14 @@ ${text}`, structured };
     return { content: [{ type: "text", text: out.text }], ...out.structured !== void 0 ? { structuredContent: out.structured } : {}, isError };
   }
   async function callTool(name, args, signal) {
+    if (typeof name !== "string") return null;
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) return null;
     if (args !== void 0 && (typeof args !== "object" || args === null || Array.isArray(args))) return toolResult({ text: "Arguments must be an object" }, true);
     const a = args ?? {};
     try {
       onlyKnown(a, tool);
-      const out = tool.name === "measure_repo" ? await measure(a, signal) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
+      const out = tool.name === "measure_repo" ? await measure(a, signal) : tool.name === "leaderboard" ? await leaderboard(a, signal) : tool.name === "check_commit" ? check(a) : signatures(a);
       return toolResult(out, false);
     } catch (e) {
       if (e instanceof ToolError) return toolResult({ text: e.message }, true);
@@ -1806,12 +1817,14 @@ ${text}`, structured };
       case "tools/list":
         return ok({ tools: TOOLS }, true);
       case "tools/call": {
+        if (inflight.size >= MAX_INFLIGHT) return fail(-32603, `Server busy: more than ${MAX_INFLIGHT} tool calls at once`);
+        if (inflight.has(id)) return fail(-32600, "Invalid Request: id already in use");
         const ctrl = new AbortController();
         inflight.set(id, ctrl);
         try {
           const r = await callTool(params.name, params.arguments, ctrl.signal);
           if (ctrl.signal.aborted) return null;
-          if (!r) return fail(-32602, `Unknown tool: ${String(params.name).slice(0, 100)}`);
+          if (!r) return fail(-32602, typeof params.name === "string" ? `Unknown tool: ${params.name.slice(0, 100)}` : "Invalid params: name must be a string");
           return ok(r);
         } finally {
           inflight.delete(id);
@@ -1826,7 +1839,11 @@ ${text}`, structured };
 async function runStdio(deps = {}) {
   const server = createServer(deps);
   const write = (r) => {
-    if (r) process.stdout.write(JSON.stringify(r) + "\n");
+    if (!r) return;
+    if (!process.stdout.write(JSON.stringify(r) + "\n")) {
+      process.stdin.pause();
+      process.stdout.once("drain", () => process.stdin.resume());
+    }
   };
   const MAX_LINE = 4 * 1024 * 1024;
   let buf = "";
@@ -1852,9 +1869,11 @@ async function runStdio(deps = {}) {
           write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
           continue;
         }
+        const reqId = typeof msg === "object" && msg !== null && "method" in msg && "id" in msg ? msg.id : void 0;
         const p = server.handle(msg).then(write).catch((e) => {
           process.stderr.write(`howmuchai mcp: ${e instanceof Error ? e.message : String(e)}
 `);
+          if (typeof reqId === "string" || typeof reqId === "number") write({ jsonrpc: "2.0", id: reqId, error: { code: -32603, message: "Internal error" } });
         }).finally(() => pending.delete(p));
         pending.add(p);
       }

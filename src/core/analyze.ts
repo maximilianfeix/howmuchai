@@ -71,29 +71,27 @@ function count(sec: Section, b: MonthBucket, matches: Match[]): boolean {
   return true;
 }
 
-/** Most days between a squash commit and the merge of the pull request it names, when the merge sha is unknown. */
-const LINK_DAYS = 2;
+/** Merged pull requests by number and by the commit their merge created. */
+export interface PullIndex {
+  byNumber: Map<number, PullInput>;
+  bySha: Map<string, PullInput>;
+}
 
 /**
- * The merged pull request a commit was squash-merged from, or null. GitHub's squash commits end their subject
- * with "(#123)". The link needs the pull request in the fetched list, merged, and either GitHub's merge sha
- * equal to the commit or, for older raw data without that field, a merge within two days of the commit.
+ * The merged pull request a commit came from, or null. Only GitHub's own record counts: the pull request's
+ * merge_commit_sha must be the commit. A "(#123)" subject alone is not proof (reverts, cherry-picks and
+ * backports carry other pull requests' numbers), so raw data without merge shas links nothing.
  */
-export function linkedPull(c: CommitInput, pulls: Map<number, PullInput>): PullInput | null {
-  const m = /\(#(\d{1,9})\)\s*$/.exec(c.message.split("\n", 1)[0] ?? "");
-  if (!m) return null;
-  const p = pulls.get(Number(m[1]));
-  if (!p || !p.mergedAt) return null;
-  if (p.mergeCommitSha) return p.mergeCommitSha === c.sha ? p : null;
-  const dt = Math.abs(Date.parse(c.date) - Date.parse(p.mergedAt));
-  return Number.isFinite(dt) && dt <= LINK_DAYS * 86_400_000 ? p : null;
+export function linkedPull(c: CommitInput, pulls: PullIndex): PullInput | null {
+  const p = pulls.bySha.get(c.sha);
+  return p && p.mergedAt ? p : null;
 }
 
 /**
  * Matches of a commit: its own signatures, or, when it has no high-confidence one itself, the high-confidence
  * signatures of the pull request it was squash-merged from (squash messages can drop the PR's footer).
  */
-export function commitMatches(c: CommitInput, cls: Classifier, pulls: Map<number, PullInput>): { matches: Match[]; viaPull: number | null } {
+export function commitMatches(c: CommitInput, cls: Classifier, pulls: PullIndex): { matches: Match[]; viaPull: number | null } {
   const own = cls.commit(c);
   if (own.some((m) => m.confidence === "high")) return { matches: own, viaPull: null };
   const p = linkedPull(c, pulls);
@@ -104,11 +102,13 @@ export function commitMatches(c: CommitInput, cls: Classifier, pulls: Map<number
   return { matches: own, viaPull: null };
 }
 
-export function pullIndex(pulls: PullInput[]): Map<number, PullInput> {
-  return new Map(pulls.map((p) => [p.number, p]));
+export function pullIndex(pulls: PullInput[]): PullIndex {
+  const bySha = new Map<string, PullInput>();
+  for (const p of pulls) if (p.mergedAt && p.mergeCommitSha) bySha.set(p.mergeCommitSha, p);
+  return { byNumber: new Map(pulls.map((p) => [p.number, p])), bySha };
 }
 
-export function summarizeCommits(items: CommitInput[], cls: Classifier, evidenceLimit: number, pulls: Map<number, PullInput> = new Map()): Section {
+export function summarizeCommits(items: CommitInput[], cls: Classifier, evidenceLimit: number, pulls: PullIndex = pullIndex([])): Section {
   const sec = emptySection();
   const months = new Map<string, MonthBucket>();
   sec.fetched = items.length;

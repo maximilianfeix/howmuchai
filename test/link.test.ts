@@ -11,6 +11,7 @@ const pull = (number: number, body: string, extra: Partial<PullInput> = {}): Pul
   branch: "feature",
   createdAt: "2026-10-09T00:00:00Z",
   mergedAt: "2026-10-10T12:00:05Z",
+  mergeCommitSha: "aaaaaaa1",
   url: `https://github.com/o/r/pull/${number}`,
   ...extra,
 });
@@ -37,19 +38,19 @@ describe("squash commits inherit the signature of their pull request", () => {
     expect(r.commits.evidence[0]!.matched).toMatch(/^PR #12: /);
   });
 
-  it("needs the merge sha to match when GitHub gives one", () => {
+  it("links only through GitHub's merge sha, never by the number in the subject", () => {
     const p = pull(12, FOOTER, { mergeCommitSha: "ffffffff" });
     expect(linkedPull(commit("aaaaaaa1", "Add the thing (#12)"), pullIndex([p]))).toBeNull();
     expect(linkedPull(commit("ffffffff", "Add the thing (#12)"), pullIndex([p]))?.number).toBe(12);
+    // an edited squash subject still links
+    expect(linkedPull(commit("ffffffff", "Add the thing"), pullIndex([p]))?.number).toBe(12);
+    // a revert or backport that names #12 does not
+    expect(linkedPull(commit("bbbbbbbb", "Revert feature (#12)"), pullIndex([p]))).toBeNull();
   });
 
-  it("does not link to an unmerged PR, a PR merged long before, a number in the body, or a missing PR", () => {
-    const prs = pullIndex([pull(12, FOOTER, { mergedAt: null }), pull(13, FOOTER, { mergedAt: "2026-09-01T00:00:00Z" }), pull(14, FOOTER)]);
-    expect(linkedPull(commit("a", "Add (#12)"), prs)).toBeNull();
-    expect(linkedPull(commit("b", "Add (#13)"), prs)).toBeNull();
-    expect(linkedPull(commit("c", "Add the thing\n\nsee (#14)"), prs)).toBeNull();
-    expect(linkedPull(commit("d", "Add (#99)"), prs)).toBeNull();
-    expect(linkedPull(commit("e", "Revert \"Add (#14)\" and more"), prs)).toBeNull();
+  it("does not link without a merge sha, or to an unmerged PR", () => {
+    expect(linkedPull(commit("a", "Add (#12)"), pullIndex([pull(12, FOOTER, { mergeCommitSha: null })]))).toBeNull();
+    expect(linkedPull(commit("aaaaaaa1", "Add (#12)"), pullIndex([pull(12, FOOTER, { mergedAt: null })]))).toBeNull();
   });
 
   it("keeps the commit's own signature when it has one", () => {
