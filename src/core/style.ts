@@ -75,6 +75,8 @@ export interface StyleModel {
   /** Mean score of human commits (before July 2022) and of disclosed agent commits in the training data. */
   humanMean: number;
   agentMean: number;
+  /** Size of the training data. Missing in models before version 2. */
+  trainedOn?: { agent: number; human: number; repos: number };
 }
 
 export function score(model: StyleModel, message: string): number {

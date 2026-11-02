@@ -134,6 +134,10 @@ export interface Beyond {
     aiReference: "repo" | "training";
     /** Commits whose message is too short to carry any style signal. */
     tooShort: number;
+    /** Undisclosed commits that were scored. Missing in early reports. */
+    judged?: number;
+    /** Unsigned commits by bot accounts, left out of the estimate and counted as not AI-involved. Missing in early reports. */
+    bots?: number;
   };
   /** Disclosed plus estimated, as a share of all commits; null without an estimate. */
   likely: null | { point: number; lo: number; hi: number };

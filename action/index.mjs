@@ -910,28 +910,31 @@ function rng(seed) {
 }
 function prevalence(S, H, A, seed = 42, rounds = 400, minGap = 0.1) {
   if (S.length === 0) return null;
-  const one = (s, h, a) => {
+  const one = (s, h, a, gap) => {
     const hm = typeof h === "number" ? h : mean(h);
     const am = typeof a === "number" ? a : mean(a);
-    if (am - hm < minGap) return NaN;
+    if (!(am - hm > gap)) return NaN;
     return Math.min(1, Math.max(0, (mean(s) - hm) / (am - hm)));
   };
-  const point = one(S, H, A);
+  const point = one(S, H, A, minGap - 1e-12);
   if (Number.isNaN(point)) return null;
   const r = rng(seed);
   const resample = (x) => x.map(() => x[Math.floor(r() * x.length)]);
   const boots = [];
+  let unidentifiable = 0;
   for (let i = 0; i < rounds; i++) {
-    const v = one(resample(S), typeof H === "number" ? H : resample(H), typeof A === "number" ? A : resample(A));
-    if (!Number.isNaN(v)) boots.push(v);
+    const v = one(resample(S), typeof H === "number" ? H : resample(H), typeof A === "number" ? A : resample(A), 1e-6);
+    if (Number.isNaN(v)) unidentifiable++;
+    else boots.push(v);
   }
+  if (unidentifiable > 0.05 * rounds) return { point, lo: 0, hi: 1 };
   boots.sort((a, b) => a - b);
   return { point, lo: boots[Math.floor(0.05 * (boots.length - 1))] ?? point, hi: boots[Math.ceil(0.95 * (boots.length - 1))] ?? point };
 }
 
 // src/core/style-model.json
 var style_model_default = {
-  version: 1,
+  version: 2,
   trainedAt: "2026-11-02",
   features: [
     "log subject length (without prefix)",
@@ -1018,8 +1021,13 @@ var style_model_default = {
     0.07306,
     0.32422
   ],
-  humanMean: 0.2751,
-  agentMean: 0.724
+  humanMean: 0.3608,
+  agentMean: 0.8439,
+  trainedOn: {
+    agent: 14554,
+    human: 13021,
+    repos: 152
+  }
 };
 
 // src/core/style.ts
@@ -1213,7 +1221,9 @@ function beyondSignatures(d, cls) {
   if (signed.size < GATE_DISCLOSED) return { ...beyond, reason: (d.setup?.length ?? 0) > 0 ? "setup-only" : "no-evidence" };
   const gate = "disclosed";
   const isBot = (c) => /\[bot\]$/i.test(c.authorLogin ?? "") || /\[bot\]$/i.test(c.authorName ?? "");
-  const undisclosed = items.filter((c) => !signed.has(c) && !isBot(c));
+  const unsigned = items.filter((c) => !signed.has(c));
+  const undisclosed = unsigned.filter((c) => !isBot(c));
+  const bots = unsigned.length - undisclosed.length;
   const judged = undisclosed.filter((c) => isJudgeable(c.message));
   const short = undisclosed.length - judged.length;
   if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
@@ -1229,20 +1239,23 @@ function beyondSignatures(d, cls) {
   else return { ...beyond, reason: "too-little-history" };
   const p = prevalence(S, H, A, 42, 400, 0.2);
   if (!p) return { ...beyond, reason: "inseparable" };
-  if (p.hi - p.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
+  const n = items.length;
+  const likely = {
+    point: (signed.size + p.point * undisclosed.length) / n,
+    lo: (signed.size + p.lo * judged.length) / n,
+    hi: (signed.size + p.hi * judged.length + short) / n
+  };
+  if (p.hi - p.lo > MAX_RANGE || likely.hi - likely.lo > MAX_RANGE) return { ...beyond, reason: "too-uncertain" };
   beyond.estimate = {
     ...p,
     gate,
     humanReference: typeof H === "number" ? "training" : "own-history",
     aiReference: typeof A === "number" ? "training" : "repo",
-    tooShort: short
+    tooShort: short,
+    judged: judged.length,
+    bots
   };
-  const n = items.length;
-  beyond.likely = {
-    point: (signed.size + p.point * undisclosed.length) / n,
-    lo: (signed.size + p.lo * judged.length) / n,
-    hi: (signed.size + p.hi * undisclosed.length) / n
-  };
+  beyond.likely = likely;
   return beyond;
 }
 function buildReport(d, opts = {}) {
