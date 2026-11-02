@@ -81,6 +81,20 @@ function render(r: Report, evidence: boolean): string {
     ...section("AI-signed pull requests", r.pulls, "pull requests", r),
     "",
   ];
+  const b = r.beyond;
+  if (b && r.commits.total > 0) {
+    const pc = (x: number) => `${Math.round(100 * x)}%`;
+    lines.push(`${c.bold("Beyond signatures")} ${c.dim("(experimental)")}`);
+    if (b.estimate && b.likely) {
+      lines.push(`  likely ${c.bold(`${pc(b.likely.lo)}–${pc(b.likely.hi)}`)} AI-involved, best estimate ${pc(b.likely.point)}`);
+      lines.push(c.dim(`  style estimate of ${r.commits.total - r.commits.ai} undisclosed commits vs ${b.estimate.humanReference === "own-history" ? "this repo before July 2022" : "typical human commits"}; ${b.estimate.tooShort} too short to judge`));
+    } else {
+      lines.push(c.dim("  no estimate: fewer than 5 disclosed agent commits and no agent setup files"));
+    }
+    if (b.authors.aiAuthors) lines.push(`  ${pc(b.authors.commitsByAiAuthors / r.commits.total)} of commits by ${b.authors.aiAuthors}/${b.authors.authors} authors who disclose agent use here`);
+    if (b.setup) lines.push(`  agent setup files: ${b.setup.length ? b.setup.map((s) => s.path).join(", ") : "none"}`);
+    lines.push("");
+  }
   if (evidence) {
     lines.push(c.bold("Evidence"));
     for (const e of [...r.commits.evidence, ...r.pulls.evidence]) {

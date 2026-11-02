@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+import { buildReport, GATE_DISCLOSED, type RepoData } from "../src/core/analyze";
+import { prevalence } from "../src/core/estimate";
+import { isJudgeable, stripSignatures } from "../src/core/style";
+import { validateReport } from "../src/core/validate";
+
+const agentMsg = (i: number) =>
+  `fix(parser): handle empty option values without crashing the sender ${i}\n\nThe replication protocol allows options without values, but the parser read the argument directly. This change reads both options through the helper, which reports a missing value cleanly and keeps the old behaviour otherwise.\n\n- read proto_version and publication_names through defGetString()\n- add a regression test for both options`;
+const humanMsg = (i: number) => (i % 2 ? `fix typo ${i}` : `bump deps ${i}`);
+function data(opts: { signed: number; undisclosedAgentStyle: number; human: number; baseline?: number; setup?: { path: string; agentId: string }[] }): RepoData {
+  const items: RepoData["commits"]["items"] = [];
+  let n = 0;
+  const push = (message: string, author = "dev") => items.push({ sha: `s${n}`, message, date: "2026-10-10T00:00:00Z", url: `https://github.com/o/r/commit/s${n++}`, authorLogin: author, parents: 1 });
+  for (let i = 0; i < opts.signed; i++) push(`${agentMsg(i)}\n\nCo-Authored-By: Claude <noreply@anthropic.com>`);
+  for (let i = 0; i < opts.undisclosedAgentStyle; i++) push(agentMsg(100 + i));
+  for (let i = 0; i < opts.human; i++) push(humanMsg(i), "other");
+  return {
+    repo: { fullName: "o/r", url: "https://github.com/o/r", description: null, stars: 1, defaultBranch: "main", language: null, archived: false, fork: false },
+    commits: { items, capped: false },
+    pulls: { items: [], capped: false },
+    baseline: opts.baseline ? Array.from({ length: opts.baseline }, (_, i) => ({ sha: `b${i}`, message: humanMsg(i), date: "2021-01-01T00:00:00Z", url: `https://github.com/o/r/commit/b${i}`, parents: 1 })) : [],
+    setup: opts.setup ?? [],
+    since: "2026-08-04T00:00:00Z",
+    until: "2026-11-02T00:00:00Z",
+    days: 90,
+  };
+}
+
+describe("beyond signatures", () => {
+  it("never estimates without evidence of agent use", () => {
+    const r = buildReport(data({ signed: GATE_DISCLOSED - 1, undisclosedAgentStyle: 60, human: 20 }));
+    expect(r.beyond?.estimate).toBeNull();
+    expect(r.beyond?.likely).toBeNull();
+    expect(validateReport(r).ok).toBe(true);
+  });
+
+  it("estimates when the repo discloses agent use, with an ordered range above the disclosed share", () => {
+    const r = buildReport(data({ signed: 20, undisclosedAgentStyle: 60, human: 20, baseline: 60 }));
+    const e = r.beyond!.estimate!, l = r.beyond!.likely!;
+    expect(e.gate).toBe("disclosed");
+    expect(e.humanReference).toBe("own-history");
+    expect(e.aiReference).toBe("repo");
+    expect(e.lo).toBeLessThanOrEqual(e.point);
+    expect(e.point).toBeLessThanOrEqual(e.hi);
+    expect(l.lo).toBeGreaterThanOrEqual(r.share! - 1e-9);
+    expect(e.point).toBeGreaterThan(0.5); // most undisclosed commits look like the disclosed ones
+    expect(validateReport(r).ok).toBe(true);
+  });
+
+  it("estimates near zero when the undisclosed commits look like the repo's own history", () => {
+    const r = buildReport(data({ signed: 20, undisclosedAgentStyle: 0, human: 80, baseline: 80 }));
+    expect(r.beyond!.estimate!.point).toBeLessThan(0.1);
+  });
+
+  it("uses agent setup files as a gate and the training references when the repo has none", () => {
+    const r = buildReport(data({ signed: 0, undisclosedAgentStyle: 30, human: 30, setup: [{ path: "CLAUDE.md", agentId: "claude-code" }] }));
+    expect(r.beyond!.estimate!.gate).toBe("setup");
+    expect(r.beyond!.estimate!.humanReference).toBe("training");
+    expect(r.beyond!.estimate!.aiReference).toBe("training");
+    expect(r.beyond!.setup).toEqual([{ path: "CLAUDE.md", agentId: "claude-code" }]);
+  });
+
+  it("counts commits by authors who disclose agent use", () => {
+    const r = buildReport(data({ signed: 5, undisclosedAgentStyle: 15, human: 10 }));
+    expect(r.beyond!.authors).toEqual({ aiAuthors: 1, authors: 2, commitsByAiAuthors: 20 });
+  });
+
+  it("never lets the signature itself into the style features", () => {
+    expect(stripSignatures("x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")).toBe("x");
+    expect(isJudgeable("Release 1.5.0")).toBe(false);
+    expect(isJudgeable(agentMsg(1))).toBe(true);
+  });
+});
+
+describe("prevalence", () => {
+  it("recovers a known mix and is deterministic", () => {
+    const S = [...Array(30).fill(0.9), ...Array(70).fill(0.1)];
+    const a = prevalence(S, Array(50).fill(0.1), Array(50).fill(0.9))!;
+    expect(a.point).toBeCloseTo(0.3, 5);
+    expect(prevalence(S, Array(50).fill(0.1), Array(50).fill(0.9))).toEqual(a);
+  });
+  it("refuses when the references cannot be told apart, and clamps to 0..1", () => {
+    expect(prevalence([0.5], 0.5, 0.55)).toBeNull();
+    expect(prevalence([0.99, 0.99], 0.2, 0.8)!.point).toBe(1);
+    expect(prevalence([0.01], 0.2, 0.8)!.point).toBe(0);
+    expect(prevalence([], 0.2, 0.8)).toBeNull();
+  });
+});

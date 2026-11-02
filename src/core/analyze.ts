@@ -1,11 +1,18 @@
 import { createClassifier, type Classifier } from "./classify";
 import { GitHubClient } from "./github";
 import { registry } from "./registry";
-import type { CommitInput, Evidence, Match, MonthBucket, PullInput, Report, Section } from "./types";
+import { prevalence } from "./estimate";
+import modelJson from "./style-model.json";
+import { isJudgeable, score, type StyleModel } from "./style";
+import type { Beyond, CommitInput, Evidence, Match, MonthBucket, PullInput, Report, Section } from "./types";
+
+const styleModel = modelJson as StyleModel;
 
 export const VERSION = "0.1.0";
 
 export interface AnalyzeOptions {
+  /** Also collect evidence beyond signatures (two to four extra requests). Default true. */
+  beyond?: boolean;
   days?: number;
   maxCommits?: number;
   maxPulls?: number;
@@ -109,6 +116,10 @@ export interface RepoData {
   repo: Awaited<ReturnType<GitHubClient["repo"]>>;
   commits: { items: CommitInput[]; capped: boolean };
   pulls: { items: PullInput[]; capped: boolean };
+  /** Commits from before July 2022, the repo's human baseline (only fetched when needed). */
+  baseline?: CommitInput[] | null;
+  /** Agent setup files, null when not looked up. */
+  setup?: { path: string; agentId: string }[] | null;
   since: string;
   until: string;
   days: number;
@@ -126,7 +137,54 @@ export async function fetchRepoData(input: string, opts: AnalyzeOptions = {}): P
     client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits, now.toISOString()),
     client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls, now.toISOString()),
   ]);
-  return { repo, commits, pulls, since, until: now.toISOString(), days };
+  const data: RepoData = { repo, commits, pulls, since, until: now.toISOString(), days, baseline: null, setup: null };
+  if (opts.beyond !== false) {
+    data.setup = await client.agentSetup(repo.fullName);
+    // The baseline costs one request; only fetch it when the gate can pass.
+    const cls = createClassifier(registry);
+    const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && cls.commit(c).some((m) => m.confidence === "high")).length;
+    if (disclosed >= GATE_DISCLOSED || data.setup.length > 0) data.baseline = await client.baseline(repo.fullName);
+  }
+  return data;
+}
+
+/** Minimum disclosed commits before the experimental estimate is made (see eval/STYLE.md). */
+export const GATE_DISCLOSED = 5;
+
+export function beyondSignatures(d: RepoData, cls: Classifier): Beyond {
+  const items = d.commits.items.filter((c) => !cls.isIgnoredCommit(c));
+  const signed = new Set<CommitInput>();
+  for (const c of items) if (cls.commit(c).some((m) => m.confidence === "high")) signed.add(c);
+  const who = (c: CommitInput) => (c.authorLogin ?? c.authorEmail ?? c.authorName ?? "").toLowerCase();
+  const aiAuthors = new Set([...signed].map(who).filter(Boolean));
+  const authors = new Set(items.map(who).filter(Boolean));
+  const beyond: Beyond = {
+    setup: d.setup ?? null,
+    authors: { aiAuthors: aiAuthors.size, authors: authors.size, commitsByAiAuthors: items.filter((c) => aiAuthors.has(who(c))).length },
+    estimate: null,
+    likely: null,
+    model: styleModel.version,
+  };
+  const gate = signed.size >= GATE_DISCLOSED ? "disclosed" : (d.setup?.length ?? 0) > 0 ? "setup" : null;
+  const undisclosed = items.filter((c) => !signed.has(c));
+  if (!gate || undisclosed.length < 20) return beyond;
+  const S = undisclosed.map((c) => score(styleModel, c.message));
+  const ownHuman = (d.baseline ?? []).filter((c) => !cls.isIgnoredCommit(c));
+  const H = ownHuman.length >= 30 ? ownHuman.map((c) => score(styleModel, c.message)) : styleModel.humanMean;
+  const A = signed.size >= 10 ? [...signed].map((c) => score(styleModel, c.message)) : styleModel.agentMean;
+  const p = prevalence(S, H, A);
+  if (!p) return beyond;
+  beyond.estimate = {
+    ...p,
+    gate,
+    humanReference: typeof H === "number" ? "training" : "own-history",
+    aiReference: typeof A === "number" ? "training" : "repo",
+    tooShort: undisclosed.filter((c) => !isJudgeable(c.message)).length,
+  };
+  const n = items.length;
+  const share = (x: number) => (signed.size + x * undisclosed.length) / n;
+  beyond.likely = { point: share(p.point), lo: share(p.lo), hi: share(p.hi) };
+  return beyond;
 }
 
 export function buildReport(d: RepoData, opts: { evidenceLimit?: number } = {}): Report {
@@ -151,6 +209,7 @@ export function buildReport(d: RepoData, opts: { evidenceLimit?: number } = {}):
     commits: cSec,
     pulls: pSec,
     share: cSec.total > 0 ? cSec.ai / cSec.total : null,
+    beyond: beyondSignatures(d, cls),
     generatedAt: d.until,
   };
 }

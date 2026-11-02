@@ -160,3 +160,11 @@ table.lb .mini .bar { margin: 0; height: 8px; }
 .agents-table code { font-size: 12px; overflow-wrap: anywhere; }
 .prose { max-width: 760px; }
 .prose h2 { margin-top: 36px; }
+
+.beyond { margin: 26px 0 0; }
+.beyond .tag { font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .06em; color: var(--bg); background: var(--muted); border-radius: 4px; padding: 2px 6px; vertical-align: middle; margin-left: 6px; }
+.bar.range { position: relative; background: var(--surface-2); }
+.bar.range .band { background: repeating-linear-gradient(135deg, var(--accent) 0 6px, transparent 6px 10px); opacity: .7; }
+.facts { margin: 10px 0 12px; padding-left: 18px; font-size: 15px; }
+.facts li { margin: 3px 0; }
+.beyond .stat span { font-family: var(--sans); }
