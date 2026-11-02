@@ -147,7 +147,7 @@ VS Code (`.vscode/mcp.json`):
 { "servers": { "howmuchai": { "type": "stdio", "command": "npx", "args": ["-y", "github:maximilianfeix/howmuchai", "mcp"] } } }
 ```
 
-The token is optional and only needed for live measurements of untracked repos. It is sent only to api.github.com and never appears in tool output.
+The server speaks both protocol generations: the `initialize` handshake (2024-11-05 to 2025-11-25) and `server/discover` (2026-07-28). The token is optional and only needed for live measurements of untracked repos. It is sent only to api.github.com and never appears in tool output.
 
 ## How it measures
 

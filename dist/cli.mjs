@@ -1497,6 +1497,10 @@ function validateBoard(v) {
 // src/mcp/server.ts
 var SITE = "https://maximilianfeix.github.io/howmuchai";
 var PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+var MODERN_VERSIONS = ["2026-07-28"];
+var META_VERSION = "io.modelcontextprotocol/protocolVersion";
+var META_CAPS = "io.modelcontextprotocol/clientCapabilities";
+var META_SERVER = "io.modelcontextprotocol/serverInfo";
 var ToolError = class extends Error {
 };
 var READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
@@ -1630,7 +1634,9 @@ function summarize(r, evidence, source) {
 function createServer(deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const token = deps.token ?? null;
-  const github = deps.github ?? (() => new GitHubClient({ token, userAgent: `howmuchai-mcp/${VERSION}`, attempts: 3, maxWaitMs: 3e4, timeoutMs: 3e4 }));
+  const github = deps.github ?? ((signal) => new GitHubClient({ token, userAgent: `howmuchai-mcp/${VERSION}`, attempts: 3, maxWaitMs: 3e4, timeoutMs: 3e4, signal }));
+  const SERVER_INFO = { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE };
+  const inflight = /* @__PURE__ */ new Map();
   const cls = createClassifier(registry);
   let board = null;
   let boardAt = 0;
@@ -1657,7 +1663,7 @@ function createServer(deps = {}) {
       throw e;
     }
   }
-  async function measure(args) {
+  async function measure(args, signal) {
     const repo = parseRepo(str(args, "repo", true));
     if (!repo) throw new ToolError("Not a GitHub repository. Use owner/repo or a github.com URL.");
     const live = bool(args, "live");
@@ -1669,7 +1675,7 @@ function createServer(deps = {}) {
       if (v?.ok) return summarize(v.value, evidence, "stored");
     }
     try {
-      return summarize(await analyzeRepo(repo, { client: github(), days }), evidence, "live");
+      return summarize(await analyzeRepo(repo, { client: github(signal), days }), evidence, "live");
     } catch (e) {
       if (e instanceof GitHubError && e.status === 404) throw new ToolError(`Repository not found or private: ${repo}`);
       if (e instanceof GitHubError && (e.resetAt || e.secondary))
@@ -1745,14 +1751,14 @@ ${text}`, structured };
   function toolResult(out, isError) {
     return { content: [{ type: "text", text: out.text }], ...out.structured !== void 0 ? { structuredContent: out.structured } : {}, isError };
   }
-  async function callTool(name, args) {
+  async function callTool(name, args, signal) {
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) return null;
     if (args !== void 0 && (typeof args !== "object" || args === null || Array.isArray(args))) return toolResult({ text: "Arguments must be an object" }, true);
     const a = args ?? {};
     try {
       onlyKnown(a, tool);
-      const out = tool.name === "measure_repo" ? await measure(a) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
+      const out = tool.name === "measure_repo" ? await measure(a, signal) : tool.name === "leaderboard" ? await leaderboard(a) : tool.name === "check_commit" ? check(a) : signatures(a);
       return toolResult(out, false);
     } catch (e) {
       if (e instanceof ToolError) return toolResult({ text: e.message }, true);
@@ -1763,36 +1769,56 @@ ${text}`, structured };
     if (typeof msg !== "object" || msg === null || Array.isArray(msg)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
     const m = msg;
     const hasId = typeof m.id === "string" || typeof m.id === "number";
+    const params = typeof m.params === "object" && m.params !== null && !Array.isArray(m.params) ? m.params : {};
     if (typeof m.method !== "string") {
       if (hasId && ("result" in m || "error" in m)) return null;
       return { jsonrpc: "2.0", id: hasId ? m.id : null, error: { code: -32600, message: "Invalid Request" } };
     }
-    if (!hasId) return null;
+    if (!hasId) {
+      if (m.method === "notifications/cancelled" && (typeof params.requestId === "string" || typeof params.requestId === "number")) inflight.get(params.requestId)?.abort();
+      return null;
+    }
     const id = m.id;
-    const ok = (result) => ({ jsonrpc: "2.0", id, result });
-    const params = typeof m.params === "object" && m.params !== null && !Array.isArray(m.params) ? m.params : {};
+    const fail = (code, message, data) => ({ jsonrpc: "2.0", id, error: { code, message, ...data !== void 0 ? { data } : {} } });
+    const meta = typeof params._meta === "object" && params._meta !== null ? params._meta : {};
+    const modern = META_VERSION in meta || m.method === "server/discover";
+    if (modern && m.method !== "server/discover") {
+      const v = meta[META_VERSION];
+      if (typeof v !== "string") return fail(-32602, `Invalid params: _meta["${META_VERSION}"] must be a string`);
+      if (!MODERN_VERSIONS.includes(v)) return fail(-32022, "Unsupported protocol version", { supported: [...MODERN_VERSIONS, ...PROTOCOL_VERSIONS], requested: v.slice(0, 50) });
+      if (typeof meta[META_CAPS] !== "object" || meta[META_CAPS] === null) return fail(-32602, `Invalid params: _meta["${META_CAPS}"] is required`);
+    }
+    const ok = (result, cacheable = false) => ({
+      jsonrpc: "2.0",
+      id,
+      result: modern ? { ...result, resultType: "complete", ...cacheable ? { ttlMs: 36e5, cacheScope: "public" } : {}, _meta: { [META_SERVER]: SERVER_INFO } } : result
+    });
     switch (m.method) {
+      case "server/discover":
+        return ok({ supportedVersions: [...MODERN_VERSIONS], capabilities: { tools: {} }, instructions: INSTRUCTIONS }, true);
       case "initialize": {
         const asked = params.protocolVersion;
         const version = typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0];
-        return ok({
-          protocolVersion: version,
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "howmuchai", title: "howmuchai", version: VERSION, websiteUrl: SITE },
-          instructions: INSTRUCTIONS
-        });
+        return ok({ protocolVersion: version, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
       }
       case "ping":
         return ok({});
       case "tools/list":
-        return ok({ tools: TOOLS });
+        return ok({ tools: TOOLS }, true);
       case "tools/call": {
-        const r = await callTool(params.name, params.arguments);
-        if (!r) return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown tool: ${String(params.name).slice(0, 100)}` } };
-        return ok(r);
+        const ctrl = new AbortController();
+        inflight.set(id, ctrl);
+        try {
+          const r = await callTool(params.name, params.arguments, ctrl.signal);
+          if (ctrl.signal.aborted) return null;
+          if (!r) return fail(-32602, `Unknown tool: ${String(params.name).slice(0, 100)}`);
+          return ok(r);
+        } finally {
+          inflight.delete(id);
+        }
       }
       default:
-        return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${m.method.slice(0, 100)}` } };
+        return fail(-32601, `Method not found: ${m.method.slice(0, 100)}`);
     }
   }
   return { handle };
