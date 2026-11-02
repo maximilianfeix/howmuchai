@@ -64,6 +64,25 @@ function checkSection(s: unknown, path: string, errors: string[]) {
   checkEvidence(x.evidence, `${path}.evidence`, errors);
 }
 
+const isShare = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+function checkRange(x: unknown, path: string, errors: string[]) {
+  if (!isObj(x) || !isShare(x.point) || !isShare(x.lo) || !isShare(x.hi)) return errors.push(`${path} is not a share range`);
+  if (!((x.lo as number) <= (x.point as number) + 1e-9 && (x.point as number) <= (x.hi as number) + 1e-9)) errors.push(`${path} is not ordered lo ≤ point ≤ hi`);
+}
+function checkBeyond(b: unknown, errors: string[]) {
+  if (!isObj(b)) return errors.push("beyond is not an object");
+  if (b.setup !== null && !(Array.isArray(b.setup) && b.setup.every((s: any) => isObj(s) && typeof s.path === "string" && typeof s.agentId === "string"))) errors.push("beyond.setup is invalid");
+  const a = b.authors as Record<string, unknown> | undefined;
+  if (!isObj(a) || !isCount(a.aiAuthors) || !isCount(a.authors) || !isCount(a.commitsByAiAuthors) || (a.aiAuthors as number) > (a.authors as number)) errors.push("beyond.authors is invalid");
+  if (b.estimate !== null) {
+    checkRange(b.estimate, "beyond.estimate", errors);
+    const e = b.estimate as Record<string, unknown>;
+    if (isObj(e) && (!["disclosed", "setup"].includes(e.gate as string) || !isCount(e.tooShort))) errors.push("beyond.estimate fields are invalid");
+  }
+  if (b.likely !== null) checkRange(b.likely, "beyond.likely", errors);
+  if (b.reason !== undefined && b.reason !== null && !["no-commits", "no-evidence", "all-disclosed", "too-few-judgeable", "inseparable"].includes(b.reason as string)) errors.push("beyond.reason is unknown");
+}
+
 export function validateReport(v: unknown): Checked<Report> {
   const errors: string[] = [];
   if (!isObj(v)) return { ok: false, errors: ["not an object"] };
@@ -80,6 +99,7 @@ export function validateReport(v: unknown): Checked<Report> {
   else if (Date.parse(r.generatedAt) > Date.now() + 3_600_000) errors.push("generatedAt is in the future");
   checkSection(r.commits, "commits", errors);
   checkSection(r.pulls, "pulls", errors);
+  if (r.beyond !== undefined) checkBeyond(r.beyond, errors);
   if (isObj(r.commits) && isCount(r.commits.total) && isCount(r.commits.ai)) {
     const want = r.commits.total > 0 ? r.commits.ai / r.commits.total : null;
     if (r.share !== want && !(typeof r.share === "number" && want !== null && Math.abs(r.share - want) < 1e-9)) errors.push("share does not match ai/total");

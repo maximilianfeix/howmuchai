@@ -268,6 +268,35 @@ var GitHubClient = class {
       }
     }
   }
+  /** Up to `max` commits from before July 2022 (before coding agents): the repo's own human baseline. */
+  async baseline(fullName, max = 100) {
+    try {
+      const batch = await this.get(`/repos/${fullName}/commits?until=2022-07-01T00:00:00Z&per_page=${Math.min(100, max)}`);
+      return batch.map(toCommit);
+    } catch (e) {
+      if (e instanceof GitHubError && (e.status === 409 || e.status === 404)) return [];
+      throw e;
+    }
+  }
+  /** Agent setup files on the default branch (root, .github, .github/workflows): at most three requests. */
+  async agentSetup(fullName) {
+    const list = async (dir) => {
+      try {
+        const items = await this.get(`/repos/${fullName}/contents/${dir}`);
+        return Array.isArray(items) ? items.map((i) => dir ? `${dir}/${i.name}` : i.name) : [];
+      } catch (e) {
+        if (e instanceof GitHubError && (e.status === 404 || e.status === 409)) return [];
+        throw e;
+      }
+    };
+    const root = await list("");
+    const paths = new Set(root);
+    if (paths.has(".github")) {
+      for (const p of await list(".github")) paths.add(p);
+      if (paths.has(".github/workflows")) for (const p of await list(".github/workflows")) paths.add(p);
+    }
+    return SETUP_FILES.filter((f) => paths.has(f.path));
+  }
   /**
    * Pull requests opened between `since` and `until`, newest first, at most `max`.
    * `capped` is true exactly when more pull requests were opened in the window than were returned.
@@ -298,6 +327,24 @@ var GitHubClient = class {
     }
   }
 };
+var SETUP_FILES = [
+  { path: "CLAUDE.md", agentId: "claude-code" },
+  { path: ".claude", agentId: "claude-code" },
+  { path: "AGENTS.md", agentId: "codex" },
+  { path: ".codex", agentId: "codex" },
+  { path: ".cursorrules", agentId: "cursor" },
+  { path: ".cursor", agentId: "cursor" },
+  { path: "GEMINI.md", agentId: "gemini" },
+  { path: ".gemini", agentId: "gemini" },
+  { path: ".aider.conf.yml", agentId: "aider" },
+  { path: ".aider.chat.history.md", agentId: "aider" },
+  { path: ".windsurfrules", agentId: "windsurf" },
+  { path: ".clinerules", agentId: "cline" },
+  { path: "opencode.json", agentId: "opencode" },
+  { path: ".junie", agentId: "junie" },
+  { path: ".github/copilot-instructions.md", agentId: "copilot" },
+  { path: ".github/workflows/copilot-setup-steps.yml", agentId: "copilot" }
+];
 function toCommit(c) {
   return {
     sha: c.sha,
@@ -328,7 +375,7 @@ function toPull(p) {
 
 // signatures/agents.json
 var agents_default = {
-  version: 4,
+  version: 5,
   ignoredAuthors: [
     "dependabot[bot]",
     "dependabot-preview[bot]",
@@ -537,6 +584,22 @@ var agents_default = {
           pattern: "^[^\\S\\n]*assisted-by:[ \\t]*(?:openai[ \\t]+)?codex\\b[^\\n]{0,80}$",
           confidence: "high",
           contains: "assisted-by"
+        },
+        {
+          id: "codex/task-link",
+          kind: "commit-message",
+          pattern: "https://chatgpt\\.com/codex/tasks/task_[A-Za-z0-9_]{8,}",
+          confidence: "high",
+          contains: "chatgpt.com/codex/tasks/",
+          note: "Codex cloud task link"
+        },
+        {
+          id: "codex/pr-task-link",
+          kind: "pr-body",
+          pattern: "https://chatgpt\\.com/codex/tasks/task_[A-Za-z0-9_]{8,}",
+          confidence: "high",
+          contains: "chatgpt.com/codex/tasks/",
+          note: "Codex cloud task link in the PR description"
         }
       ]
     },
@@ -805,6 +868,24 @@ var agents_default = {
           note: "Junie with another address"
         }
       ]
+    },
+    {
+      id: "gemini",
+      name: "Gemini CLI",
+      color: "#7DA6E8",
+      signals: []
+    },
+    {
+      id: "windsurf",
+      name: "Windsurf",
+      color: "#5EC4C0",
+      signals: []
+    },
+    {
+      id: "cline",
+      name: "Cline",
+      color: "#C7B26A",
+      signals: []
     }
   ]
 };
@@ -819,7 +900,203 @@ function agentColor(id) {
   return byId.get(id)?.color ?? "#8b949e";
 }
 
+// src/core/estimate.ts
+var mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => (s = Math.imul(s, 1103515245) + 12345 >>> 0) / 2 ** 32;
+}
+function prevalence(S, H, A, seed = 42, rounds = 400) {
+  if (S.length === 0) return null;
+  const one = (s, h, a) => {
+    const hm = typeof h === "number" ? h : mean(h);
+    const am = typeof a === "number" ? a : mean(a);
+    if (am - hm < 0.1) return NaN;
+    return Math.min(1, Math.max(0, (mean(s) - hm) / (am - hm)));
+  };
+  const point = one(S, H, A);
+  if (Number.isNaN(point)) return null;
+  const r = rng(seed);
+  const resample = (x) => x.map(() => x[Math.floor(r() * x.length)]);
+  const boots = [];
+  for (let i = 0; i < rounds; i++) {
+    const v = one(resample(S), typeof H === "number" ? H : resample(H), typeof A === "number" ? A : resample(A));
+    if (!Number.isNaN(v)) boots.push(v);
+  }
+  boots.sort((a, b) => a - b);
+  return { point, lo: boots[Math.floor(0.05 * (boots.length - 1))] ?? point, hi: boots[Math.ceil(0.95 * (boots.length - 1))] ?? point };
+}
+
+// src/core/style-model.json
+var style_model_default = {
+  version: 1,
+  trainedAt: "2026-11-02",
+  features: [
+    "log subj len",
+    "log prose len",
+    "has prose",
+    "log prose lines",
+    "log bullets",
+    "log backticks",
+    "md bold/heading",
+    "conventional",
+    "squash (#n)",
+    "em dash/arrow",
+    "log sentences",
+    "long-line share",
+    "wrapped<=72",
+    "human trailers",
+    "lowercase subj",
+    "log max line",
+    "numbered list",
+    "explanatory phrases",
+    "two spaces after period",
+    "avg word len",
+    "first person",
+    "informal",
+    "identifiers in subject"
+  ],
+  weights: [
+    1.12411,
+    0.66518,
+    -0.2135,
+    0.71841,
+    -0.54007,
+    -0.0155,
+    0.08998,
+    0.57347,
+    -0.10648,
+    0.40837,
+    1.61855,
+    0.01411,
+    -0.07684,
+    -0.01374,
+    -0.15712,
+    -0.07344,
+    -0.18056,
+    -0.14138,
+    -0.02421,
+    -0.40346,
+    -0.65751,
+    -0.06522,
+    -0.05286
+  ],
+  bias: 0.38149,
+  mean: [
+    3.94286,
+    3.39009,
+    0.56957,
+    1.21851,
+    0.44359,
+    0.54899,
+    0.06565,
+    0.29198,
+    0.53306,
+    0.04231,
+    0.77842,
+    0.08069,
+    0.30228,
+    0.08789,
+    0.48137,
+    2.46698,
+    0.0103,
+    0.13134,
+    982e-5,
+    1.08312,
+    0.05677,
+    537e-5,
+    0.15053
+  ],
+  scale: [
+    0.51179,
+    3.13249,
+    0.49514,
+    1.34727,
+    0.86293,
+    1.18469,
+    0.24768,
+    0.45467,
+    0.49891,
+    0.20129,
+    1.03193,
+    0.22779,
+    0.45924,
+    0.30543,
+    0.49965,
+    2.18911,
+    0.10094,
+    0.33778,
+    0.09863,
+    0.95477,
+    0.2556,
+    0.07305,
+    0.32805
+  ],
+  humanMean: 0.2499,
+  agentMean: 0.7492
+};
+
+// src/core/style.ts
+var SIG = /^\s*(co-authored-by|assisted-by|claude-session|copilot-session|amp-thread(-id)?)\s*:/i;
+var SIG_TEXT = /generated (with|by)|claude\.ai\/code|🤖|cursor\.com|devin\.ai|capy\.ai|chatgpt\.com\/codex/i;
+function stripSignatures(m) {
+  return m.slice(0, 65536).split("\n").filter((l) => !SIG.test(l) && !SIG_TEXT.test(l)).join("\n").replace(/^aider: /i, "").replace(/ \(aider\)$/im, "").trim();
+}
+var strip = stripSignatures;
+var TRAILER = /^[A-Za-z][A-Za-z-]{1,40}:\s+\S/;
+var HUMAN_TRAILER = /^(reviewed-by|acked-by|tested-by|reported-by|suggested-by|reported-and-tested-by|cc|author|discussion|backpatch-through|link|closes|fixes|bug|signed-off-by|change-id|bug-url|pr-url|reviewed-on)\s*:/i;
+function features(raw) {
+  const m = strip(raw);
+  const lines = m.split("\n");
+  const subj = lines[0] ?? "";
+  const rest = lines.slice(1);
+  const trailers = rest.filter((l) => TRAILER.test(l.trim()));
+  const prose = rest.filter((l) => l.trim() && !TRAILER.test(l.trim()) && !/^\s*(https?:\/\/|\[\d+\]|>)/.test(l));
+  const body = prose.join("\n");
+  const l1 = (x) => Math.log1p(x);
+  const words = body.split(/\s+/).filter(Boolean);
+  return [
+    l1(subj.length),
+    l1(body.length),
+    +(prose.length > 0),
+    l1(prose.length),
+    l1((body.match(/^\s*[-*•] /gm) ?? []).length),
+    l1((m.match(/`/g) ?? []).length),
+    +/\*\*[^*]+\*\*|^#{1,3} /m.test(body),
+    +/^(feat|fix|chore|docs|refactor|test|tests|ci|perf|build|style)(\([^)]+\))?!?: /.test(subj),
+    +/\(#\d+\)$/.test(subj),
+    +/[—→]/.test(m),
+    l1((body.match(/[.!?](\s|$)/g) ?? []).length),
+    prose.length ? Math.min(1, prose.filter((l) => l.length > 76).length / prose.length) : 0,
+    prose.length ? +prose.every((l) => l.length <= 72) : 0,
+    l1(trailers.filter((l) => HUMAN_TRAILER.test(l.trim())).length),
+    +/^[a-z]/.test(subj),
+    l1(prose.reduce((mx, l) => l.length > mx ? l.length : mx, 0)),
+    +/^\s*\d+\.\s/m.test(body),
+    +/\b(this (change|commit|pr|patch)|so that|instead of|which means)\b/i.test(body),
+    +/[a-z]\.  [A-Z]/.test(m),
+    // two spaces after a full stop
+    words.length ? l1(words.reduce((s, w) => s + w.length, 0) / words.length) : 0,
+    l1((body.match(/\b(we|I|I'm|I've|we're|let's)\b/g) ?? []).length),
+    // first person
+    +/[!?]{2,}|:\)|;\)|\blol\b|\bhmm\b/i.test(m),
+    l1((subj.match(/[A-Z][a-z]+[A-Z]|[a-z]+_[a-z]+|\w+\(\)/g) ?? []).length)
+    // identifiers in subject
+  ];
+}
+function isJudgeable(message) {
+  const m = stripSignatures(message);
+  return m.length >= 40 || m.split("\n").filter((l) => l.trim()).length >= 2;
+}
+function score(model, message) {
+  const x = features(message);
+  let z = model.bias;
+  for (let i = 0; i < x.length; i++) z += model.weights[i] * ((x[i] - model.mean[i]) / model.scale[i]);
+  return 1 / (1 + Math.exp(-z));
+}
+
 // src/core/analyze.ts
+var styleModel = style_model_default;
 var VERSION = "0.1.0";
 var DEFAULTS = { days: 90, maxCommits: 500, maxPulls: 300, evidenceLimit: 40 };
 function parseRepo(input2) {
@@ -907,7 +1184,76 @@ async function fetchRepoData(input2, opts = {}) {
     client.commits(repo.fullName, since, opts.maxCommits ?? DEFAULTS.maxCommits, now.toISOString()),
     client.pulls(repo.fullName, since, opts.maxPulls ?? DEFAULTS.maxPulls, now.toISOString())
   ]);
-  return { repo, commits, pulls, since, until: now.toISOString(), days };
+  const data = { repo, commits, pulls, since, until: now.toISOString(), days, baseline: null, setup: null };
+  if (opts.beyond !== false) {
+    const optional = async (f) => {
+      try {
+        return await f();
+      } catch (e) {
+        if (e instanceof AbortedError) throw e;
+        return null;
+      }
+    };
+    data.setup = await optional(() => client.agentSetup(repo.fullName));
+    const cls = createClassifier(registry);
+    const disclosed = commits.items.filter((c) => !cls.isIgnoredCommit(c) && cls.commit(c).some((m) => m.confidence === "high")).length;
+    if (disclosed >= GATE_DISCLOSED || (data.setup?.length ?? 0) > 0) data.baseline = await optional(() => client.baseline(repo.fullName));
+  }
+  return data;
+}
+var GATE_DISCLOSED = 5;
+var AGENT_ACCOUNT = /\[bot\]$|^(copilot|cursoragent|claude|devin-ai-integration|google-labs-jules|openhands(-agent)?|opencode-agent|capy-ai)$/i;
+var MIN_JUDGEABLE = 20;
+function beyondSignatures(d, cls) {
+  const items = d.commits.items.filter((c) => !cls.isIgnoredCommit(c));
+  const signed = /* @__PURE__ */ new Set();
+  for (const c of items) if (cls.commit(c).some((m) => m.confidence === "high")) signed.add(c);
+  const loginByEmail = /* @__PURE__ */ new Map();
+  for (const c of items) if (c.authorLogin && c.authorEmail) loginByEmail.set(c.authorEmail.toLowerCase(), c.authorLogin.toLowerCase());
+  const who = (c) => {
+    const login = c.authorLogin?.toLowerCase() ?? (c.authorEmail ? loginByEmail.get(c.authorEmail.toLowerCase()) : void 0);
+    if (login) return AGENT_ACCOUNT.test(login) ? null : `@${login}`;
+    if (c.authorEmail) return `<${c.authorEmail.toLowerCase()}>`;
+    return null;
+  };
+  const people = items.filter((c) => who(c) !== null);
+  const aiAuthors = new Set([...signed].map(who).filter((x) => x !== null));
+  const beyond = {
+    setup: d.setup ?? null,
+    authors: { aiAuthors: aiAuthors.size, authors: new Set(people.map(who)).size, commitsByAiAuthors: people.filter((c) => aiAuthors.has(who(c))).length },
+    estimate: null,
+    likely: null,
+    reason: null,
+    model: styleModel.version
+  };
+  if (items.length === 0) return { ...beyond, reason: "no-commits" };
+  const gate = signed.size >= GATE_DISCLOSED ? "disclosed" : (d.setup?.length ?? 0) > 0 ? "setup" : null;
+  if (!gate) return { ...beyond, reason: "no-evidence" };
+  const undisclosed = items.filter((c) => !signed.has(c));
+  const judged = undisclosed.filter((c) => isJudgeable(c.message));
+  const short = undisclosed.length - judged.length;
+  if (judged.length < MIN_JUDGEABLE) return { ...beyond, reason: undisclosed.length === 0 ? "all-disclosed" : "too-few-judgeable" };
+  const S = judged.map((c) => score(styleModel, c.message));
+  const ownHuman = (d.baseline ?? []).filter((c) => !cls.isIgnoredCommit(c) && isJudgeable(c.message));
+  const H = ownHuman.length >= 30 ? ownHuman.map((c) => score(styleModel, c.message)) : styleModel.humanMean;
+  const signedJudged = [...signed].filter((c) => isJudgeable(c.message));
+  const A = signedJudged.length >= 10 ? signedJudged.map((c) => score(styleModel, c.message)) : styleModel.agentMean;
+  const p = prevalence(S, H, A);
+  if (!p) return { ...beyond, reason: "inseparable" };
+  beyond.estimate = {
+    ...p,
+    gate,
+    humanReference: typeof H === "number" ? "training" : "own-history",
+    aiReference: typeof A === "number" ? "training" : "repo",
+    tooShort: short
+  };
+  const n = items.length;
+  beyond.likely = {
+    point: (signed.size + p.point * undisclosed.length) / n,
+    lo: (signed.size + p.lo * judged.length) / n,
+    hi: (signed.size + p.hi * undisclosed.length) / n
+  };
+  return beyond;
 }
 function buildReport(d, opts = {}) {
   const evidenceLimit = opts.evidenceLimit ?? DEFAULTS.evidenceLimit;
@@ -931,6 +1277,7 @@ function buildReport(d, opts = {}) {
     commits: cSec,
     pulls: pSec,
     share: cSec.total > 0 ? cSec.ai / cSec.total : null,
+    beyond: beyondSignatures(d, cls),
     generatedAt: d.until
   };
 }

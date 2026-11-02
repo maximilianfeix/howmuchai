@@ -129,3 +129,10 @@ test("a malformed URL shows the homepage instead of crashing (round 2)", async (
   await expect(page.locator("h1")).toContainText("How much of this repo");
   expect(errors).toEqual([]);
 });
+
+test("shows the experimental section and refuses to estimate without evidence", async ({ page }) => {
+  await page.goto("r/demo/beta/");
+  await expect(page.locator(".beyond")).toContainText("Beyond signatures");
+  await expect(page.locator(".beyond")).toContainText("No estimate");
+  await expect(page.locator(".beyond")).toContainText("disclosed: certain");
+});

@@ -236,6 +236,37 @@ export class GitHubClient {
     }
   }
 
+  /** Up to `max` commits from before July 2022 (before coding agents): the repo's own human baseline. */
+  async baseline(fullName: string, max = 100): Promise<CommitInput[]> {
+    try {
+      const batch = await this.get<RawCommit[]>(`/repos/${fullName}/commits?until=2022-07-01T00:00:00Z&per_page=${Math.min(100, max)}`);
+      return batch.map(toCommit);
+    } catch (e) {
+      if (e instanceof GitHubError && (e.status === 409 || e.status === 404)) return [];
+      throw e;
+    }
+  }
+
+  /** Agent setup files on the default branch (root, .github, .github/workflows): at most three requests. */
+  async agentSetup(fullName: string): Promise<{ path: string; agentId: string }[]> {
+    const list = async (dir: string): Promise<string[]> => {
+      try {
+        const items = await this.get<{ name: string }[]>(`/repos/${fullName}/contents/${dir}`);
+        return Array.isArray(items) ? items.map((i) => (dir ? `${dir}/${i.name}` : i.name)) : [];
+      } catch (e) {
+        if (e instanceof GitHubError && (e.status === 404 || e.status === 409)) return [];
+        throw e;
+      }
+    };
+    const root = await list("");
+    const paths = new Set(root);
+    if (paths.has(".github")) {
+      for (const p of await list(".github")) paths.add(p);
+      if (paths.has(".github/workflows")) for (const p of await list(".github/workflows")) paths.add(p);
+    }
+    return SETUP_FILES.filter((f) => paths.has(f.path));
+  }
+
   /**
    * Pull requests opened between `since` and `until`, newest first, at most `max`.
    * `capped` is true exactly when more pull requests were opened in the window than were returned.
@@ -267,6 +298,26 @@ export class GitHubClient {
     }
   }
 }
+
+/** Files and folders that agents read or their setup commands create, mapped to the agent. */
+export const SETUP_FILES: { path: string; agentId: string }[] = [
+  { path: "CLAUDE.md", agentId: "claude-code" },
+  { path: ".claude", agentId: "claude-code" },
+  { path: "AGENTS.md", agentId: "codex" },
+  { path: ".codex", agentId: "codex" },
+  { path: ".cursorrules", agentId: "cursor" },
+  { path: ".cursor", agentId: "cursor" },
+  { path: "GEMINI.md", agentId: "gemini" },
+  { path: ".gemini", agentId: "gemini" },
+  { path: ".aider.conf.yml", agentId: "aider" },
+  { path: ".aider.chat.history.md", agentId: "aider" },
+  { path: ".windsurfrules", agentId: "windsurf" },
+  { path: ".clinerules", agentId: "cline" },
+  { path: "opencode.json", agentId: "opencode" },
+  { path: ".junie", agentId: "junie" },
+  { path: ".github/copilot-instructions.md", agentId: "copilot" },
+  { path: ".github/workflows/copilot-setup-steps.yml", agentId: "copilot" },
+];
 
 interface RawUser {
   login: string;

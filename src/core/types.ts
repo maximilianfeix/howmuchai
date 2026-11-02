@@ -117,6 +117,31 @@ export interface Section {
 /** Report schema. 2: `ai` counts high-confidence signatures only; hints are separate. */
 export const REPORT_SCHEMA = 2;
 
+/** Experimental evidence beyond signatures. Never used for the headline number, badges or the leaderboard ranking. */
+export interface Beyond {
+  /** Agent setup files on the default branch; null when they were not looked up. */
+  setup: { path: string; agentId: string }[] | null;
+  /** Commits written by people who disclose agent use in at least one other commit of this window. */
+  authors: { aiAuthors: number; authors: number; commitsByAiAuthors: number };
+  /** Estimated AI share of the undisclosed commits, or null when the gate is not passed. */
+  estimate: null | {
+    point: number;
+    lo: number;
+    hi: number;
+    /** Why an estimate was made at all. */
+    gate: "disclosed" | "setup";
+    humanReference: "own-history" | "training";
+    aiReference: "repo" | "training";
+    /** Commits whose message is too short to carry any style signal. */
+    tooShort: number;
+  };
+  /** Disclosed plus estimated, as a share of all commits; null without an estimate. */
+  likely: null | { point: number; lo: number; hi: number };
+  /** Why there is no estimate; null when there is one. Missing in early reports. */
+  reason?: null | "no-commits" | "no-evidence" | "all-disclosed" | "too-few-judgeable" | "inseparable";
+  model: number;
+}
+
 export interface Report {
   schema: 2;
   tool: { name: "howmuchai"; version: string; registry: number };
@@ -133,5 +158,7 @@ export interface Report {
   pulls: Section;
   /** ai / total of commits, 0..1, or null when there are no commits in the window. */
   share: number | null;
+  /** Experimental, see Beyond. Missing in older reports. */
+  beyond?: Beyond;
   generatedAt: string;
 }

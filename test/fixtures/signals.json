@@ -512,5 +512,21 @@
   "neg": [
    "x\n\nAssisted-by: Cursory"
   ]
+ },
+ "codex/task-link": {
+  "pos": [
+   "x\n\nhttps://chatgpt.com/codex/tasks/task_e_68a1b2c3d4e5f6"
+  ],
+  "neg": [
+   "see https://chatgpt.com/codex for docs"
+  ]
+ },
+ "codex/pr-task-link": {
+  "pos": [
+   "Summary\n\n------\nhttps://chatgpt.com/codex/tasks/task_e_68a1b2c3d4e5f6"
+  ],
+  "neg": [
+   "https://chatgpt.com/codex/tasks/"
+  ]
  }
 }

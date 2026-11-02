@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "ignoredAuthors": [
     "dependabot[bot]",
     "dependabot-preview[bot]",
@@ -208,6 +208,22 @@
           "pattern": "^[^\\S\\n]*assisted-by:[ \\t]*(?:openai[ \\t]+)?codex\\b[^\\n]{0,80}$",
           "confidence": "high",
           "contains": "assisted-by"
+        },
+        {
+          "id": "codex/task-link",
+          "kind": "commit-message",
+          "pattern": "https://chatgpt\\.com/codex/tasks/task_[A-Za-z0-9_]{8,}",
+          "confidence": "high",
+          "contains": "chatgpt.com/codex/tasks/",
+          "note": "Codex cloud task link"
+        },
+        {
+          "id": "codex/pr-task-link",
+          "kind": "pr-body",
+          "pattern": "https://chatgpt\\.com/codex/tasks/task_[A-Za-z0-9_]{8,}",
+          "confidence": "high",
+          "contains": "chatgpt.com/codex/tasks/",
+          "note": "Codex cloud task link in the PR description"
         }
       ]
     },
@@ -476,6 +492,24 @@
           "note": "Junie with another address"
         }
       ]
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "color": "#7DA6E8",
+      "signals": []
+    },
+    {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "color": "#5EC4C0",
+      "signals": []
+    },
+    {
+      "id": "cline",
+      "name": "Cline",
+      "color": "#C7B26A",
+      "signals": []
     }
   ]
 }

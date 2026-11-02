@@ -35,8 +35,8 @@ jobs:
         if: github.event_name != 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # GITHUB_TOKEN allows 1,000 requests per hour; a repo needs about 8.
-        run: npx tsx scripts/crawl.ts --data .data --max 100 --reserve 120 --concurrency 2
+        # GITHUB_TOKEN allows 1,000 requests per hour; a repo needs about 8 plus up to 4 for evidence beyond signatures.
+        run: npx tsx scripts/crawl.ts --data .data --max 80 --reserve 120 --concurrency 2
       - name: Save data
         if: github.event_name != 'push'
         run: |

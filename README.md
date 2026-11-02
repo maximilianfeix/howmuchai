@@ -125,6 +125,24 @@ The full list with regular expressions lives in [`signatures/agents.json`](signa
 
 Signatures can be turned off, squash merges can drop them, and code pasted from a chat leaves no mark. A signature also says an agent was involved, not how many lines it wrote. So a high number means a lot of disclosed AI involvement, a low number does not mean little AI use, and **"no signature found" never means human-written**.
 
+## Beyond signatures (experimental)
+
+Many people remove agent signatures, so a repo built entirely with agents can show a low disclosed number. Every report therefore adds evidence that never changes the headline number, the badge or the leaderboard ranking:
+
+- **Authors who disclose agent use:** the share of commits by people who sign at least one other commit in the window.
+- **Agent setup files:** `CLAUDE.md`, `AGENTS.md`, `.cursor/`, `GEMINI.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml` and others.
+- **A style estimate with a 90% interval:** a small logistic model of commit-message style, trained on about 30,000 disclosed agent commits (signatures removed) against 13,000 commits from before coding agents in the same repositories. It compares a repo's undisclosed commits with that repo's own commits from before July 2022 and with its disclosed agent commits.
+
+```
+maximilianfeix/proxy-scraper
+AI-signed commits  13%
+Beyond signatures (experimental)
+  likely 47%–69% AI-involved, best estimate 55%
+  98% of commits by 1/6 authors who disclose agent use here
+```
+
+On mixtures of 40 commits with a known AI share the median absolute error is about 6–10 percentage points (less for repos with more commits) and the 90% interval holds the true share in about 96% of cases. Single commits cannot be judged reliably, and careful human writers score like agents, so an estimate is only made where agent use is already evident (at least 5 disclosed agent commits or agent setup files). Details and all numbers: [`eval/STYLE.md`](eval/STYLE.md).
+
 ## FAQ
 
 **Is this anti-AI?** No. It is a measuring tape. Many of the most-starred projects use agents openly, and the numbers show it. Whether that is good is up to you.
