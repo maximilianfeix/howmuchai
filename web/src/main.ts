@@ -476,6 +476,7 @@ function renderMethod() {
       <li>Commits on the default branch from the last ${DEFAULTS.days} days, newest first, up to ${DEFAULTS.maxCommits}. Busy repos reach that cap within days; the result then says "since &lt;date&gt;".</li>
       <li>Pull requests opened in the same period, up to ${DEFAULTS.maxPulls}.</li>
       <li>Merge commits and dependency bots (Dependabot, Renovate, GitHub Actions and others) are left out of both counts.</li>
+      <li>Trailers and footers count only on a line of their own, so a commit that merely mentions "Generated with Claude Code" in a sentence is not counted. E-mail addresses and bot accounts must match exactly.</li>
       <li>Each commit or pull request counts once. If it carries signatures of two agents, it is attributed to the first in the table below.</li>
     </ul>
     <h2>Why the number is a lower bound</h2>

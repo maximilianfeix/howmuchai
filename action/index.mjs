@@ -8,7 +8,7 @@ function createClassifier(reg) {
   const signals = [];
   for (const agent of reg.agents) {
     for (const s of agent.signals) {
-      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "im"), confidence: s.confidence });
+      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "i"), confidence: s.confidence });
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
@@ -19,11 +19,32 @@ function createClassifier(reg) {
   const prAuthor = of("pr-author");
   const prBody = of("pr-body");
   const prBranch = of("pr-branch");
-  function run2(list, text2, out) {
-    if (!text2) return;
-    if (text2.length > 65536) text2 = text2.slice(0, 65536);
+  const MAX_LINE = 512;
+  const MAX_FIELD = 256;
+  function lines(text2) {
+    if (!text2) return [];
+    const out = [];
+    for (const raw of text2.slice(0, 262144).split("\n")) {
+      const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      if (line.length > 0 && line.length <= MAX_LINE) out.push(line);
+    }
+    return out;
+  }
+  function runLines(list, ls, out) {
     for (const s of list) {
-      const m = s.re.exec(text2);
+      for (const line of ls) {
+        const m = s.re.exec(line);
+        if (m) {
+          out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
+          break;
+        }
+      }
+    }
+  }
+  function runField(list, value, out) {
+    if (!value || value.length > MAX_FIELD) return;
+    for (const s of list) {
+      const m = s.re.exec(value);
       if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
     }
   }
@@ -39,18 +60,19 @@ function createClassifier(reg) {
   return {
     commit(c) {
       const out = [];
-      run2(trailer, c.message, out);
-      run2(message, c.message, out);
+      const ls = lines(c.message);
+      runLines(trailer, ls, out);
+      runLines(message, ls, out);
       for (const field of [c.authorLogin, c.authorName, c.authorEmail, c.committerLogin, c.committerName, c.committerEmail]) {
-        run2(author, field, out);
+        runField(author, field, out);
       }
       return dedupe(out);
     },
     pull(p) {
       const out = [];
-      run2(prAuthor, p.authorLogin, out);
-      run2(prBody, p.body, out);
-      run2(prBranch, p.branch, out);
+      runField(prAuthor, p.authorLogin, out);
+      runLines(prBody, lines(p.body), out);
+      runField(prBranch, p.branch, out);
       return dedupe(out);
     },
     isIgnoredCommit(c) {
@@ -194,7 +216,7 @@ function toPull(p) {
 
 // signatures/agents.json
 var agents_default = {
-  version: 2,
+  version: 3,
   ignoredAuthors: [
     "dependabot[bot]",
     "dependabot-preview[bot]",
@@ -217,36 +239,42 @@ var agents_default = {
       color: "#8D9DFF",
       signals: [
         {
+          id: "claude-code/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*claude\\b[^<\\n]*<noreply@anthropic\\.com>",
+          pattern: "^co-authored-by:[ \\t]*claude\\b[^<\\n]*<noreply@anthropic\\.com>",
           confidence: "high",
           note: 'Added by Claude Code; the name carries the model, e.g. "Claude Opus 5.5 (1M context)"'
         },
         {
+          id: "claude-code/footer",
           kind: "commit-message",
-          pattern: "generated (with|by) \\[?claude code\\]?",
+          pattern: "^[^\\S\\n]*(?:\u{1F916}[^\\S\\n]*)?generated (?:with|by) \\[?claude code\\]?(?:\\(https?://[^)\\s]+\\))?[^\\S\\n]*\\.?[^\\S\\n]*$",
           confidence: "high",
-          note: 'Default footer "\u{1F916} Generated with Claude Code"'
+          note: 'Default footer "\u{1F916} Generated with [Claude Code](\u2026)" on a line of its own'
         },
         {
+          id: "claude-code/author",
           kind: "commit-author",
           pattern: "^claude\\[bot\\]$|^noreply@anthropic\\.com$",
           confidence: "high",
           note: "Claude GitHub app and Claude Code on the web (account @claude, owned by Anthropic)"
         },
         {
+          id: "claude-code/pr-author",
           kind: "pr-author",
-          pattern: "^claude(\\[bot\\])?$",
+          pattern: "^claude(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "claude-code/pr-footer",
           kind: "pr-body",
-          pattern: "generated (with|by) \\[?claude code\\]?",
+          pattern: "^[^\\S\\n]*(?:\u{1F916}[^\\S\\n]*)?generated (?:with|by) \\[?claude code\\]?(?:\\(https?://[^)\\s]+\\))?[^\\S\\n]*\\.?[^\\S\\n]*$",
           confidence: "high"
         },
         {
+          id: "claude-code/pr-branch",
           kind: "pr-branch",
-          pattern: "^claude/",
+          pattern: "^claude/[^\\s]+$",
           confidence: "medium",
           note: "Default branch prefix of Claude Code on the web and the Claude GitHub app"
         }
@@ -258,25 +286,29 @@ var agents_default = {
       color: "#4DB8A4",
       signals: [
         {
+          id: "copilot/author",
           kind: "commit-author",
-          pattern: "^copilot(-swe-agent)?(\\[bot\\])?$",
+          pattern: "^copilot(?:-swe-agent)?(?:\\[bot\\])?$",
           confidence: "high",
           note: "Copilot coding agent"
         },
         {
+          id: "copilot/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*copilot\\b[^\\n]*<[^>]*copilot@users\\.noreply\\.github\\.com>",
+          pattern: "^co-authored-by:[ \\t]*copilot\\b[^<\\n]*<(?:\\d+\\+)?copilot@users\\.noreply\\.github\\.com>",
           confidence: "high",
           note: "Added by Copilot in VS Code and on github.com when AI-generated changes are committed"
         },
         {
+          id: "copilot/pr-author",
           kind: "pr-author",
-          pattern: "^(app/)?copilot(-swe-agent)?(\\[bot\\])?$",
+          pattern: "^(?:app/)?copilot(?:-swe-agent)?(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "copilot/pr-branch",
           kind: "pr-branch",
-          pattern: "^copilot/",
+          pattern: "^copilot/[^\\s]+$",
           confidence: "medium",
           note: "Default branch prefix of the Copilot coding agent"
         }
@@ -288,24 +320,28 @@ var agents_default = {
       color: "#E6B75A",
       signals: [
         {
+          id: "codex/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[^<\\n]*\\bcodex\\b[^<\\n]*<[^>\\n]*>",
+          pattern: "^co-authored-by:[ \\t]*[^<\\n]*\\(codex\\)[^<\\n]*<[^>\\n]+>|^co-authored-by:[ \\t]*codex\\b[^<\\n]*<[^>\\n]+>",
           confidence: "high",
-          note: 'Codex CLI, e.g. "gpt-6-astra (Codex) <agent@example.invalid>"'
+          note: 'Codex CLI, e.g. "gpt-6-astra (Codex) <agent@example.invalid>" or "Codex <noreply@openai.com>"'
         },
         {
+          id: "codex/trailer-openai",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[^<\\n]*<noreply@openai\\.com>",
+          pattern: "^co-authored-by:[ \\t]*[^<\\n]*<noreply@openai\\.com>",
           confidence: "high"
         },
         {
+          id: "codex/pr-author",
           kind: "pr-author",
-          pattern: "^chatgpt-codex-connector(\\[bot\\])?$",
+          pattern: "^chatgpt-codex-connector(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "codex/pr-branch",
           kind: "pr-branch",
-          pattern: "^codex/",
+          pattern: "^codex/[^\\s]+$",
           confidence: "medium",
           note: "Default branch prefix of Codex cloud tasks"
         }
@@ -317,24 +353,28 @@ var agents_default = {
       color: "#D891C8",
       signals: [
         {
+          id: "cursor/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[^<\\n]*<cursoragent@cursor\\.com>",
+          pattern: "^co-authored-by:[ \\t]*[^<\\n]*<cursoragent@cursor\\.com>",
           confidence: "high",
           note: '"Cursor Agent" or "Cursor"'
         },
         {
+          id: "cursor/author",
           kind: "commit-author",
-          pattern: "^(cursoragent|cursor\\[bot\\])$|^cursoragent@cursor\\.com$",
+          pattern: "^(?:cursoragent|cursor\\[bot\\])$|^cursoragent@cursor\\.com$",
           confidence: "high"
         },
         {
+          id: "cursor/pr-author",
           kind: "pr-author",
-          pattern: "^cursor(\\[bot\\])?$",
+          pattern: "^cursor(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "cursor/pr-branch",
           kind: "pr-branch",
-          pattern: "^cursor/",
+          pattern: "^cursor/[^\\s]+$",
           confidence: "medium",
           note: "Default branch prefix of Cursor background agents"
         }
@@ -346,13 +386,15 @@ var agents_default = {
       color: "#62B9DB",
       signals: [
         {
+          id: "devin/author",
           kind: "commit-author",
-          pattern: "^devin-ai-integration(\\[bot\\])?$|devin-ai-integration\\[bot\\]@users\\.noreply\\.github\\.com",
+          pattern: "^devin-ai-integration(?:\\[bot\\])?$|^(?:\\d+\\+)?devin-ai-integration\\[bot\\]@users\\.noreply\\.github\\.com$",
           confidence: "high"
         },
         {
+          id: "devin/pr-author",
           kind: "pr-author",
-          pattern: "^devin-ai-integration(\\[bot\\])?$",
+          pattern: "^devin-ai-integration(?:\\[bot\\])?$",
           confidence: "high"
         }
       ]
@@ -363,13 +405,15 @@ var agents_default = {
       color: "#B0BF65",
       signals: [
         {
+          id: "jules/author",
           kind: "commit-author",
-          pattern: "^google-labs-jules(\\[bot\\])?$",
+          pattern: "^google-labs-jules(?:\\[bot\\])?$|^(?:\\d+\\+)?google-labs-jules\\[bot\\]@users\\.noreply\\.github\\.com$",
           confidence: "high"
         },
         {
+          id: "jules/pr-author",
           kind: "pr-author",
-          pattern: "^google-labs-jules(\\[bot\\])?$",
+          pattern: "^google-labs-jules(?:\\[bot\\])?$",
           confidence: "high"
         }
       ]
@@ -380,14 +424,16 @@ var agents_default = {
       color: "#ED9983",
       signals: [
         {
+          id: "aider/author",
           kind: "commit-author",
-          pattern: "\\(aider\\)$",
+          pattern: "^[^\\n]*[^\\s(]\\s\\(aider\\)$",
           confidence: "high",
-          note: "Aider appends (aider) to the author name"
+          note: 'Aider appends " (aider)" to the author name'
         },
         {
+          id: "aider/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*aider\\b",
+          pattern: "^co-authored-by:[ \\t]*aider\\b[^<\\n]*<[^>\\n]+>",
           confidence: "high"
         }
       ]
@@ -398,13 +444,15 @@ var agents_default = {
       color: "#B39BDC",
       signals: [
         {
+          id: "amp/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*amp\\s*<amp@ampcode\\.com>",
+          pattern: "^co-authored-by:[ \\t]*amp[ \\t]*<amp@ampcode\\.com>",
           confidence: "high"
         },
         {
+          id: "amp/thread",
           kind: "commit-trailer",
-          pattern: "^amp-thread(-id)?:\\s*https://ampcode\\.com/",
+          pattern: "^amp-thread(?:-id)?:[ \\t]*https://ampcode\\.com/\\S+",
           confidence: "high"
         }
       ]
@@ -415,13 +463,15 @@ var agents_default = {
       color: "#88AFBE",
       signals: [
         {
+          id: "openhands/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*openhands\\s*<openhands@all-hands\\.dev>",
+          pattern: "^co-authored-by:[ \\t]*openhands[ \\t]*<openhands@all-hands\\.dev>",
           confidence: "high"
         },
         {
+          id: "openhands/author",
           kind: "commit-author",
-          pattern: "^openhands(-agent)?(\\[bot\\])?$|openhands@all-hands\\.dev",
+          pattern: "^openhands(?:-agent)?(?:\\[bot\\])?$|^openhands@all-hands\\.dev$",
           confidence: "high"
         }
       ]
@@ -432,24 +482,28 @@ var agents_default = {
       color: "#C9A27E",
       signals: [
         {
+          id: "capy/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:[^<\\n]*<[^>]*capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
+          pattern: "^co-authored-by:[ \\t]*[^<\\n]*<(?:\\d+\\+)?capy-ai\\[bot\\]@users\\.noreply\\.github\\.com>",
           confidence: "high",
           note: "Capy AI GitHub app (capy.ai)"
         },
         {
+          id: "capy/author",
           kind: "commit-author",
-          pattern: "^capy-ai(\\[bot\\])?$",
+          pattern: "^capy-ai(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "capy/pr-author",
           kind: "pr-author",
-          pattern: "^capy-ai(\\[bot\\])?$",
+          pattern: "^capy-ai(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "capy/pr-branch",
           kind: "pr-branch",
-          pattern: "^capy/",
+          pattern: "^capy/[^\\s]+$",
           confidence: "medium"
         }
       ]
@@ -460,19 +514,22 @@ var agents_default = {
       color: "#7FC7A6",
       signals: [
         {
+          id: "opencode/author",
           kind: "commit-author",
-          pattern: "^opencode-agent(\\[bot\\])?$",
+          pattern: "^opencode-agent(?:\\[bot\\])?$",
           confidence: "high",
           note: "OpenCode Agent GitHub app (opencode.ai)"
         },
         {
+          id: "opencode/pr-author",
           kind: "pr-author",
-          pattern: "^opencode-agent(\\[bot\\])?$",
+          pattern: "^opencode-agent(?:\\[bot\\])?$",
           confidence: "high"
         },
         {
+          id: "opencode/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*opencode\\b[^\\n]*<",
+          pattern: "^co-authored-by:[ \\t]*opencode\\b[^<\\n]*<[^>\\n]+>",
           confidence: "high"
         }
       ]
@@ -483,8 +540,9 @@ var agents_default = {
       color: "#E58FB0",
       signals: [
         {
+          id: "junie/trailer",
           kind: "commit-trailer",
-          pattern: "^co-authored-by:\\s*junie\\b[^\\n]*<",
+          pattern: "^co-authored-by:[ \\t]*junie\\b[^<\\n]*<[^>\\n]+>",
           confidence: "medium",
           note: "JetBrains Junie"
         }

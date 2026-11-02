@@ -19,7 +19,7 @@ export function createClassifier(reg: Registry): Classifier {
   const signals: CompiledSignal[] = [];
   for (const agent of reg.agents) {
     for (const s of agent.signals) {
-      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "im"), confidence: s.confidence });
+      signals.push({ agentId: agent.id, kind: s.kind, re: new RegExp(s.pattern, "i"), confidence: s.confidence });
     }
   }
   const ignored = new Set(reg.ignoredAuthors.map((a) => a.toLowerCase()));
@@ -32,12 +32,39 @@ export function createClassifier(reg: Registry): Classifier {
   const prBody = of("pr-body");
   const prBranch = of("pr-branch");
 
-  function run(list: CompiledSignal[], text: string | null | undefined, out: Match[]) {
-    if (!text) return;
-    // Commit messages and PR bodies are attacker-controlled; cap their length before matching.
-    if (text.length > 65_536) text = text.slice(0, 65_536);
+  /** Longest line that can hold a trailer or footer; longer lines are skipped (and cannot cause slow matching). */
+  const MAX_LINE = 512;
+  /** Longest name, e-mail, login or branch that is matched. */
+  const MAX_FIELD = 256;
+
+  function lines(text: string | null | undefined): string[] {
+    if (!text) return [];
+    const out: string[] = [];
+    for (const raw of text.slice(0, 262_144).split("\n")) {
+      const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      if (line.length > 0 && line.length <= MAX_LINE) out.push(line);
+    }
+    return out;
+  }
+
+  /** Tests line-based signals (trailers, footers) against each line on its own. */
+  function runLines(list: CompiledSignal[], ls: string[], out: Match[]) {
     for (const s of list) {
-      const m = s.re.exec(text);
+      for (const line of ls) {
+        const m = s.re.exec(line);
+        if (m) {
+          out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
+          break;
+        }
+      }
+    }
+  }
+
+  /** Tests field signals (authors, logins, branches) against one short value. */
+  function runField(list: CompiledSignal[], value: string | null | undefined, out: Match[]) {
+    if (!value || value.length > MAX_FIELD) return;
+    for (const s of list) {
+      const m = s.re.exec(value);
       if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
     }
   }
@@ -55,18 +82,19 @@ export function createClassifier(reg: Registry): Classifier {
   return {
     commit(c) {
       const out: Match[] = [];
-      run(trailer, c.message, out);
-      run(message, c.message, out);
+      const ls = lines(c.message);
+      runLines(trailer, ls, out);
+      runLines(message, ls, out);
       for (const field of [c.authorLogin, c.authorName, c.authorEmail, c.committerLogin, c.committerName, c.committerEmail]) {
-        run(author, field, out);
+        runField(author, field, out);
       }
       return dedupe(out);
     },
     pull(p) {
       const out: Match[] = [];
-      run(prAuthor, p.authorLogin, out);
-      run(prBody, p.body, out);
-      run(prBranch, p.branch, out);
+      runField(prAuthor, p.authorLogin, out);
+      runLines(prBody, lines(p.body), out);
+      runField(prBranch, p.branch, out);
       return dedupe(out);
     },
     isIgnoredCommit(c) {
