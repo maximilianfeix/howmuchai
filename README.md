@@ -10,7 +10,7 @@
 <h3 align="center">How much of this repo was built with AI?</h3>
 
 <p align="center">
-  Paste any public GitHub repo. howmuchai reads its recent commits and pull requests and counts the ones that carry an AI coding-agent signature: Claude Code, Copilot, Codex, Cursor, Devin, Jules, Aider and more. Every match links to its commit.
+  Paste any public GitHub repo. howmuchai reads its recent commits and pull requests and counts the ones that carry an AI coding-agent signature: Claude Code, Copilot, Codex, Cursor, Devin, Jules, Gemini CLI, Windsurf, Cline, Warp and 26 more. Every match links to its commit.
 </p>
 
 <p align="center">
