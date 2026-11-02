@@ -1,15 +1,54 @@
 import type { CommitInput, PullInput } from "./types";
 
 export class GitHubError extends Error {
+  /** True for GitHub's secondary (abuse) rate limits, which clear after a short wait. */
+  readonly secondary: boolean;
+  /** Milliseconds GitHub asked to wait (Retry-After), if any. */
+  readonly retryAfter: number | null;
   constructor(
     message: string,
     readonly status: number,
-    /** Unix seconds when the rate limit resets, if the error was a rate limit. */
+    /** Unix seconds when the primary rate limit resets, if the error was that limit. */
     readonly resetAt: number | null = null,
+    extra: { secondary?: boolean; retryAfter?: number | null } = {},
   ) {
     super(message);
     this.name = "GitHubError";
+    this.secondary = extra.secondary ?? false;
+    this.retryAfter = extra.retryAfter ?? null;
   }
+}
+
+/** The request never got an HTTP answer (DNS, connection reset, timeout). */
+export class NetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NetworkError";
+  }
+}
+
+/** Parses Retry-After (seconds or an HTTP date) into milliseconds. */
+export function parseRetryAfter(value: string | null, nowMs: number): number | null {
+  if (!value) return null;
+  if (/^\d+$/.test(value.trim())) return Number(value.trim()) * 1000;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? Math.max(0, t - nowMs) : null;
+}
+
+/**
+ * How long to wait before retrying, or null if the error is not worth retrying.
+ * Retried: network errors, 5xx, secondary rate limits. Not retried: 4xx like 401/404/409/422/451 and the
+ * primary rate limit (its reset is usually far away; callers stop and report it instead).
+ */
+export function retryDelay(e: unknown, attempt: number, _nowMs: number, random: () => number): number | null {
+  const backoff = Math.min(30_000, 1000 * 2 ** (attempt - 1)) * (0.5 + random() / 2);
+  if (e instanceof NetworkError) return backoff;
+  if (!(e instanceof GitHubError)) return null;
+  if (e.resetAt) return null;
+  if (e.retryAfter !== null && (e.secondary || e.status >= 500 || e.status === 429)) return e.retryAfter;
+  if (e.secondary) return Math.max(backoff, 60_000 * (0.5 + random() / 2));
+  if (e.status >= 500) return backoff;
+  return null;
 }
 
 export interface ClientOptions {
@@ -18,6 +57,16 @@ export interface ClientOptions {
   fetch?: typeof fetch;
   /** Only sent outside browsers. */
   userAgent?: string;
+  /** Attempts per request for retryable failures (network, 5xx, secondary rate limits). Default 4. */
+  attempts?: number;
+  /** Longest single wait before a retry; a longer Retry-After fails fast instead. Default 60 s. */
+  maxWaitMs?: number;
+  /** Per-request timeout. Default 30 s. */
+  timeoutMs?: number;
+  /** For tests. */
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  random?: () => number;
 }
 
 export interface RepoInfo {
@@ -51,13 +100,43 @@ export class GitHubClient {
   }
 
   async get<T>(path: string): Promise<T> {
+    const attempts = this.opts.attempts ?? 4;
+    const maxWait = this.opts.maxWaitMs ?? 60_000;
+    const sleep = this.opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const now = this.opts.now ?? Date.now;
+    const random = this.opts.random ?? Math.random;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      let wait: number | null = null;
+      try {
+        return await this.once<T>(path);
+      } catch (e) {
+        lastError = e;
+        wait = retryDelay(e, attempt, now(), random);
+      }
+      if (wait === null || attempt === attempts || wait > maxWait) break;
+      await sleep(wait);
+    }
+    throw lastError;
+  }
+
+  private async once<T>(path: string): Promise<T> {
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
     };
     if (this.opts.token) headers.Authorization = `Bearer ${this.opts.token}`;
     if (!isBrowser) headers["User-Agent"] = this.opts.userAgent ?? "howmuchai";
-    const res = await this.doFetch(`${this.base}${path}`, { headers });
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 30_000) : null;
+    let res: Response;
+    try {
+      res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
+    } catch (e) {
+      throw new NetworkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     this.requests++;
     const limit = Number(res.headers.get("x-ratelimit-limit"));
     const remaining = Number(res.headers.get("x-ratelimit-remaining"));
@@ -73,8 +152,12 @@ export class GitHubClient {
       } catch {
         /* body was not JSON */
       }
-      const rateLimited = (res.status === 403 || res.status === 429) && (remaining === 0 || /rate limit/i.test(msg));
-      throw new GitHubError(msg, res.status, rateLimited ? reset || null : null);
+      const primary = (res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0";
+      const secondary = (res.status === 403 || res.status === 429) && !primary && (/secondary rate limit|abuse/i.test(msg) || res.headers.has("retry-after") || res.status === 429);
+      throw new GitHubError(msg, res.status, primary ? reset || null : null, {
+        secondary,
+        retryAfter: parseRetryAfter(res.headers.get("retry-after"), Date.now()),
+      });
     }
     return (await res.json()) as T;
   }
@@ -111,7 +194,14 @@ export class GitHubClient {
     const perPage = 100;
     const range = `since=${encodeURIComponent(since)}${until ? `&until=${encodeURIComponent(until)}` : ""}`;
     for (let page = 1; ; page++) {
-      const batch = await this.get<RawCommit[]>(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
+      let batch: RawCommit[];
+      try {
+        batch = await this.get<RawCommit[]>(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
+      } catch (e) {
+        // An empty repository answers 409 "Git Repository is empty."
+        if (e instanceof GitHubError && e.status === 409 && page === 1 && /empty/i.test(e.message)) return { items: [], capped: false };
+        throw e;
+      }
       for (const c of batch) items.push(toCommit(c));
       if (items.length > max) return { items: items.slice(0, max), capped: true };
       if (batch.length < perPage) return { items, capped: false };

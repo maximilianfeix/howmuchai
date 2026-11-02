@@ -243,7 +243,8 @@ async function renderRepo(repo: string, forceLive: boolean) {
   if (!report) {
     source = "live";
     const token = localStorage.getItem(TOKEN_KEY);
-    const client = new GitHubClient({ token });
+    // In the browser, do not keep the visitor waiting for long retries.
+    const client = new GitHubClient({ token, attempts: 3, maxWaitMs: 10_000, timeoutMs: 20_000 });
     try {
       report = await analyzeRepo(repo, { client });
     } catch (e) {

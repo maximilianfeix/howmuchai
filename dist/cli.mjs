@@ -93,15 +93,43 @@ function createClassifier(reg) {
 
 // src/core/github.ts
 var GitHubError = class extends Error {
-  constructor(message, status, resetAt = null) {
+  constructor(message, status, resetAt = null, extra = {}) {
     super(message);
     this.status = status;
     this.resetAt = resetAt;
     this.name = "GitHubError";
+    this.secondary = extra.secondary ?? false;
+    this.retryAfter = extra.retryAfter ?? null;
   }
   status;
   resetAt;
+  /** True for GitHub's secondary (abuse) rate limits, which clear after a short wait. */
+  secondary;
+  /** Milliseconds GitHub asked to wait (Retry-After), if any. */
+  retryAfter;
 };
+var NetworkError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "NetworkError";
+  }
+};
+function parseRetryAfter(value, nowMs) {
+  if (!value) return null;
+  if (/^\d+$/.test(value.trim())) return Number(value.trim()) * 1e3;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? Math.max(0, t - nowMs) : null;
+}
+function retryDelay(e, attempt, _nowMs, random) {
+  const backoff = Math.min(3e4, 1e3 * 2 ** (attempt - 1)) * (0.5 + random() / 2);
+  if (e instanceof NetworkError) return backoff;
+  if (!(e instanceof GitHubError)) return null;
+  if (e.resetAt) return null;
+  if (e.retryAfter !== null && (e.secondary || e.status >= 500 || e.status === 429)) return e.retryAfter;
+  if (e.secondary) return Math.max(backoff, 6e4 * (0.5 + random() / 2));
+  if (e.status >= 500) return backoff;
+  return null;
+}
 var isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
 var GitHubClient = class {
   constructor(opts = {}) {
@@ -115,13 +143,42 @@ var GitHubClient = class {
   lastRate = null;
   requests = 0;
   async get(path) {
+    const attempts = this.opts.attempts ?? 4;
+    const maxWait = this.opts.maxWaitMs ?? 6e4;
+    const sleep = this.opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const now = this.opts.now ?? Date.now;
+    const random = this.opts.random ?? Math.random;
+    let lastError;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      let wait = null;
+      try {
+        return await this.once(path);
+      } catch (e) {
+        lastError = e;
+        wait = retryDelay(e, attempt, now(), random);
+      }
+      if (wait === null || attempt === attempts || wait > maxWait) break;
+      await sleep(wait);
+    }
+    throw lastError;
+  }
+  async once(path) {
     const headers = {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28"
     };
     if (this.opts.token) headers.Authorization = `Bearer ${this.opts.token}`;
     if (!isBrowser) headers["User-Agent"] = this.opts.userAgent ?? "howmuchai";
-    const res = await this.doFetch(`${this.base}${path}`, { headers });
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 3e4) : null;
+    let res;
+    try {
+      res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
+    } catch (e) {
+      throw new NetworkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     this.requests++;
     const limit = Number(res.headers.get("x-ratelimit-limit"));
     const remaining = Number(res.headers.get("x-ratelimit-remaining"));
@@ -135,8 +192,12 @@ var GitHubClient = class {
         if (body.message) msg = body.message;
       } catch {
       }
-      const rateLimited = (res.status === 403 || res.status === 429) && (remaining === 0 || /rate limit/i.test(msg));
-      throw new GitHubError(msg, res.status, rateLimited ? reset || null : null);
+      const primary = (res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0";
+      const secondary = (res.status === 403 || res.status === 429) && !primary && (/secondary rate limit|abuse/i.test(msg) || res.headers.has("retry-after") || res.status === 429);
+      throw new GitHubError(msg, res.status, primary ? reset || null : null, {
+        secondary,
+        retryAfter: parseRetryAfter(res.headers.get("retry-after"), Date.now())
+      });
     }
     return await res.json();
   }
@@ -162,7 +223,13 @@ var GitHubClient = class {
     const perPage = 100;
     const range = `since=${encodeURIComponent(since)}${until ? `&until=${encodeURIComponent(until)}` : ""}`;
     for (let page = 1; ; page++) {
-      const batch = await this.get(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
+      let batch;
+      try {
+        batch = await this.get(`/repos/${fullName}/commits?${range}&per_page=${perPage}&page=${page}`);
+      } catch (e) {
+        if (e instanceof GitHubError && e.status === 409 && page === 1 && /empty/i.test(e.message)) return { items: [], capped: false };
+        throw e;
+      }
       for (const c2 of batch) items.push(toCommit(c2));
       if (items.length > max) return { items: items.slice(0, max), capped: true };
       if (batch.length < perPage) return { items, capped: false };
