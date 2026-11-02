@@ -17,6 +17,8 @@ const EXAMPLES = ["microsoft/vscode", "oven-sh/bun", "vercel/next.js", "astral-s
 // ---------- helpers ----------
 
 const url = (path: string) => `${BASE}${path}`;
+/** Only GitHub links are ever rendered from data; anything else becomes "#". */
+const safeGh = (u: string) => (/^https:\/\/github\.com\/[^\s"'<>]*$/.test(u) ? esc(u) : "#");
 const abs = (path: string) => `${SITE}/${path}`;
 
 function html(strings: TemplateStringsArray, ...values: unknown[]): string {
@@ -301,7 +303,7 @@ function tokenBox(): string {
   return html`<details class="card" style="margin-top:22px">
     <summary>${has ? "A GitHub token is saved in this browser" : "Use a GitHub token (optional)"}</summary>
     <p style="margin-top:10px">A token raises the limit from 60 to 5,000 requests per hour. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> with no permissions (public repositories only). It stays in this browser's local storage and is only sent to api.github.com.</p>
-    <div class="search" style="margin-top:12px"><input id="tok" type="password" placeholder="github_pat_…" autocomplete="off" /><button class="btn ghost" id="tok-save" type="button">Save</button>${has ? `<button class="btn ghost" id="tok-del" type="button">Remove</button>` : ""}</div>
+    <div class="search" style="margin-top:12px"><input id="tok" type="password" placeholder="github_pat_…" autocomplete="off" aria-label="GitHub token" /><button class="btn ghost" id="tok-save" type="button">Save</button>${has ? `<button class="btn ghost" id="tok-del" type="button">Remove</button>` : ""}</div>
   </details>`;
 }
 
@@ -353,7 +355,7 @@ function renderReport(r: Report, source: "stored" | "live") {
 
   main.innerHTML = html`
     <div class="result-head">
-      <h1><a href="${esc(r.repo.url)}">${esc(r.repo.fullName)}</a></h1>
+      <h1><a href="${safeGh(r.repo.url)}">${esc(r.repo.fullName)}</a></h1>
       <div class="result-meta">★ ${r.repo.stars.toLocaleString("en-US")}${r.repo.language ? ` · ${esc(r.repo.language)}` : ""} · measured ${ago(r.generatedAt)}${
         source === "stored" ? ` · <a href="?r=${encodeURIComponent(r.repo.fullName)}&live">measure live</a>` : ""
       }</div>
@@ -382,8 +384,8 @@ function renderReport(r: Report, source: "stored" | "live") {
     <details class="card"><summary>Put the badge or card in your README</summary>
       ${
         tracked
-          ? `<div class="embed"><p>Badge: <img alt="AI-signed badge" src="${url(badgePath(r.repo.fullName))}" style="vertical-align:middle"></p><textarea rows="2" readonly>${esc(badgeMd)}</textarea>
-             <p>Card:</p><img alt="howmuchai card" src="${url(cardPath(r.repo.fullName, "dark"))}" width="495" style="max-width:100%"><textarea rows="2" readonly>${esc(cardMd)}</textarea>
+          ? `<div class="embed"><p>Badge: <img alt="AI-signed badge" src="${url(badgePath(r.repo.fullName))}" style="vertical-align:middle"></p><textarea rows="2" readonly aria-label="Badge Markdown">${esc(badgeMd)}</textarea>
+             <p>Card:</p><img alt="howmuchai card" src="${url(cardPath(r.repo.fullName, "dark"))}" width="495" style="max-width:100%"><textarea rows="2" readonly aria-label="Card Markdown">${esc(cardMd)}</textarea>
              <p class="muted">Updated about once a day.</p></div>`
           : `<p>This repository is not tracked yet, so there is no live badge. <a href="https://github.com/maximilianfeix/howmuchai/issues/new?template=track-repo.yml&repo=${encodeURIComponent(r.repo.fullName)}&title=${encodeURIComponent(`Track ${r.repo.fullName}`)}">Ask to track it</a> (a bot adds it and answers with the badge code), or run the <a href="https://github.com/maximilianfeix/howmuchai#github-action">GitHub Action</a> in your own repo.</p>`
       }
@@ -392,7 +394,7 @@ function renderReport(r: Report, source: "stored" | "live") {
     <details class="card" ${evidence.length ? "" : "hidden"}><summary>Evidence (${evidence.length} newest matches)</summary>
       <ul class="evidence">${evidence
         .map(
-          (e) => html`<li><a class="ref" href="${esc(e.url)}">${esc(e.ref)}</a><span>${esc(e.title)}</span><span class="sig"><span style="color:${agentColor(e.agentId)}">■</span> ${esc(agentName(e.agentId))} · ${esc(e.kind)} · ${esc(e.matched)}${e.confidence === "medium" ? " · hint (medium confidence)" : ""}</span></li>`,
+          (e) => html`<li><a class="ref" href="${safeGh(e.url)}">${esc(e.ref)}</a><span>${esc(e.title)}</span><span class="sig"><span style="color:${agentColor(e.agentId)}">■</span> ${esc(agentName(e.agentId))} · ${esc(e.kind)} · ${esc(e.matched)}${e.confidence === "medium" ? " · hint (medium confidence)" : ""}</span></li>`,
         )
         .join("")}</ul>
     </details>
@@ -460,7 +462,7 @@ async function renderLeaderboard(g: number) {
         <button type="button" data-sort="stars" aria-pressed="false">Most stars</button>
         <button type="button" data-sort="ai" aria-pressed="false">Most signed commits</button>
       </div>
-      <select id="lb-agent" aria-label="Agent" class="chip" style="padding:8px 10px">
+      <select id="lb-agent" aria-label="Filter by agent" class="chip" style="padding:8px 10px">
         <option value="">All agents</option>
         ${registry.agents.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
       </select>
