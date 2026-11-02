@@ -111,6 +111,12 @@ var GitHubError = class extends Error {
   /** Milliseconds GitHub asked to wait (Retry-After), if any. */
   retryAfter;
 };
+var AbortedError = class extends Error {
+  constructor() {
+    super("aborted");
+    this.name = "AbortedError";
+  }
+};
 var NetworkError = class extends Error {
   constructor(message) {
     super(message);
@@ -172,15 +178,20 @@ var GitHubClient = class {
     };
     if (this.opts.token) headers.Authorization = `Bearer ${this.opts.token}`;
     if (!isBrowser) headers["User-Agent"] = this.opts.userAgent ?? "howmuchai";
+    if (this.opts.signal?.aborted) throw new AbortedError();
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = ctrl ? setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 3e4) : null;
+    const onAbort = () => ctrl?.abort();
+    this.opts.signal?.addEventListener("abort", onAbort);
     let res;
     try {
       res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
     } catch (e) {
+      if (this.opts.signal?.aborted) throw new AbortedError();
       throw new NetworkError(e instanceof Error ? e.message : String(e));
     } finally {
       if (timer) clearTimeout(timer);
+      this.opts.signal?.removeEventListener("abort", onAbort);
     }
     this.requests++;
     const limit = Number(res.headers.get("x-ratelimit-limit"));

@@ -19,6 +19,14 @@ export class GitHubError extends Error {
   }
 }
 
+/** The caller aborted the request. Never retried. */
+export class AbortedError extends Error {
+  constructor() {
+    super("aborted");
+    this.name = "AbortedError";
+  }
+}
+
 /** The request never got an HTTP answer (DNS, connection reset, timeout). */
 export class NetworkError extends Error {
   constructor(message: string) {
@@ -63,6 +71,8 @@ export interface ClientOptions {
   maxWaitMs?: number;
   /** Per-request timeout. Default 30 s. */
   timeoutMs?: number;
+  /** Aborts all requests of this client, e.g. when the user navigates away. */
+  signal?: AbortSignal;
   /** For tests. */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -127,15 +137,20 @@ export class GitHubClient {
     };
     if (this.opts.token) headers.Authorization = `Bearer ${this.opts.token}`;
     if (!isBrowser) headers["User-Agent"] = this.opts.userAgent ?? "howmuchai";
+    if (this.opts.signal?.aborted) throw new AbortedError();
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = ctrl ? setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 30_000) : null;
+    const onAbort = () => ctrl?.abort();
+    this.opts.signal?.addEventListener("abort", onAbort);
     let res: Response;
     try {
       res = await this.doFetch(`${this.base}${path}`, { headers, signal: ctrl?.signal });
     } catch (e) {
+      if (this.opts.signal?.aborted) throw new AbortedError();
       throw new NetworkError(e instanceof Error ? e.message : String(e));
     } finally {
       if (timer) clearTimeout(timer);
+      this.opts.signal?.removeEventListener("abort", onAbort);
     }
     this.requests++;
     const limit = Number(res.headers.get("x-ratelimit-limit"));

@@ -30,9 +30,11 @@
     "typecheck": "tsc --noEmit",
     "build:action": "esbuild src/action/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=action/index.mjs",
     "site": "vite build && tsx scripts/assemble.ts --site dist/site --data .data",
-    "eval": "tsx scripts/evaluate.ts"
+    "eval": "tsx scripts/evaluate.ts",
+    "e2e": "vite build && tsx e2e/make-fixtures.ts && playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
