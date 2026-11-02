@@ -21,6 +21,7 @@ function createClassifier(reg) {
   const prBranch = of("pr-branch");
   function run2(list, text2, out) {
     if (!text2) return;
+    if (text2.length > 65536) text2 = text2.slice(0, 65536);
     for (const s of list) {
       const m = s.re.exec(text2);
       if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });

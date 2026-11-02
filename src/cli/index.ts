@@ -32,6 +32,9 @@ const c = {
   },
 };
 
+/** Removes terminal control characters from text that comes from commits and pull requests. */
+const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+
 function pct(n: number, d: number): string {
   if (d === 0) return "–";
   const v = (100 * n) / d;
@@ -67,7 +70,7 @@ function render(r: Report, evidence: boolean): string {
   const from = r.commits.capped && r.commits.oldest ? r.commits.oldest.slice(0, 10) : r.window.since.slice(0, 10);
   const lines = [
     "",
-    `${c.bold(r.repo.fullName)}  ${c.dim(`★ ${r.repo.stars.toLocaleString("en-US")} · ${from} → ${r.window.until.slice(0, 10)}`)}`,
+    `${c.bold(clean(r.repo.fullName))}  ${c.dim(`★ ${r.repo.stars.toLocaleString("en-US")} · ${from} → ${r.window.until.slice(0, 10)}`)}`,
     "",
     ...section("AI-signed commits", r.commits, "commits"),
     "",
@@ -77,8 +80,8 @@ function render(r: Report, evidence: boolean): string {
   if (evidence) {
     lines.push(c.bold("Evidence"));
     for (const e of [...r.commits.evidence, ...r.pulls.evidence]) {
-      lines.push(`  ${c.hex(agentColor(e.agentId), e.ref.padEnd(8))} ${e.title.slice(0, 70)}`);
-      lines.push(`  ${c.dim(`         ${e.kind}: ${e.matched}  ${e.url}`)}`);
+      lines.push(`  ${c.hex(agentColor(e.agentId), clean(e.ref).padEnd(8))} ${clean(e.title).slice(0, 70)}`);
+      lines.push(`  ${c.dim(`         ${e.kind}: ${clean(e.matched)}  ${clean(e.url)}`)}`);
     }
     lines.push("");
   }
@@ -126,7 +129,7 @@ async function main() {
     } else if (e instanceof GitHubError && e.status === 404) {
       process.stderr.write(`Repository not found (or private): ${repo}\n`);
     } else {
-      process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
+      process.stderr.write(`${clean(e instanceof Error ? e.message : String(e))}\n`);
     }
     process.exit(1);
   }

@@ -34,6 +34,8 @@ export function createClassifier(reg: Registry): Classifier {
 
   function run(list: CompiledSignal[], text: string | null | undefined, out: Match[]) {
     if (!text) return;
+    // Commit messages and PR bodies are attacker-controlled; cap their length before matching.
+    if (text.length > 65_536) text = text.slice(0, 65_536);
     for (const s of list) {
       const m = s.re.exec(text);
       if (m) out.push({ agentId: s.agentId, kind: s.kind, matched: m[0].trim().slice(0, 120), confidence: s.confidence });
